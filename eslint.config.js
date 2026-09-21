@@ -26,4 +26,11 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // Server-side files run in Node (Vercel/Netlify functions, dev middleware).
+  {
+    files: ['nexus/api/**/*.js', 'nexus/vite.config.js'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
 ])

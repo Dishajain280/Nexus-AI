@@ -1,0 +1,19 @@
+[build]
+command = "npm run build"
+publish = "dist"
+
+# Route /api/gemini to the Netlify function (nexus/api/gemini-netlify.js).
+[functions]
+directory = "nexus/api"
+
+[[redirects]]
+from = "/api/gemini"
+to = "/.netlify/functions/gemini"
+status = 200
+force = true
+
+# SPA fallback: let React Router handle client-side routes like /snippets.
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200

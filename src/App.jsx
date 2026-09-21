@@ -16,19 +16,22 @@ function App() {
   const [currentTopicStatus, setCurrentTopicStatus] = useState("pending");
 
   // Load data
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const snippetsSaved = localStorage.getItem("codeSnippets");
-    const trackerSaved = localStorage.getItem("learningTracker");
-    if (snippetsSaved) setSnippets(JSON.parse(snippetsSaved));
-    if (trackerSaved) setTrackerTopics(JSON.parse(trackerSaved));
+    try {
+      const snippetsSaved = localStorage.getItem("codeSnippets");
+      const trackerSaved = localStorage.getItem("learningTracker");
+      if (snippetsSaved) setSnippets(JSON.parse(snippetsSaved));
+      if (trackerSaved) setTrackerTopics(JSON.parse(trackerSaved));
+    } catch (e) {
+      console.error("Error loading saved data:", e);
+    }
+
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme) {
       setTheme(savedTheme);
       document.body.dataset.theme = savedTheme;
     }
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Save snippets
   useEffect(() => {
@@ -178,7 +181,7 @@ function App() {
   const pageComponents = {
     ai: (
       <section className="page-content">
-        <h2>🤖 AI Helper</h2>
+        <h2>AI Helper</h2>
         <div className="input-section">
           <textarea
             value={aiPrompt}
@@ -187,7 +190,7 @@ function App() {
             rows="4"
             disabled={loading}
           />
-          <button onClick={handleSend} disabled={loading || !aiPrompt.trim()}>
+          <button className="primary w-full" onClick={handleSend} disabled={loading || !aiPrompt.trim()}>
             {loading ? "Generating..." : "Generate Code"}
           </button>
         </div>
@@ -219,7 +222,7 @@ function App() {
     ),
     snippets: (
       <section className="page-content">
-        <h2>💾 Snippets ({snippets.length})</h2>
+        <h2>Saved Snippets ({snippets.length})</h2>
         <div className="items-grid">
           {snippets.map((s) => (
             <div key={s.id} className="item-card">
@@ -228,8 +231,8 @@ function App() {
                 <code>{s.code.slice(0, 150)}...</code>
               </pre>
               <div className="card-actions">
-                <button onClick={() => copyText(s.code)}>Copy Code</button>
-                <button className="danger" onClick={() => deleteSnippet(s.id)}>
+                <button className="secondary flex-1" onClick={() => copyText(s.code)}>Copy</button>
+                <button className="danger flex-1" onClick={() => deleteSnippet(s.id)}>
                   Delete
                 </button>
               </div>
@@ -240,61 +243,29 @@ function App() {
     ),
     tracker: (
       <section className="page-content">
-        <h2>📚 Learning Tracker</h2>
+        <h2>Learning Tracker</h2>
         <div className="dashboard">
           {(() => {
             const stats = getStats();
             return (
               <>
                 <div className="stats-row">
-                  <div className="stat-box pending">
+                  <div className="stat-box">
                     <div className="stat-value">{stats.pending}</div>
-                    <div>Pending</div>
+                    <div className="text-sm font-semibold opacity-70">Pending</div>
                   </div>
-                  <div className="stat-box incomplete">
+                  <div className="stat-box">
                     <div className="stat-value">{stats.incomplete}</div>
-                    <div>Incomplete</div>
+                    <div className="text-sm font-semibold opacity-70">Incomplete</div>
                   </div>
-                  <div className="stat-box completed">
+                  <div className="stat-box">
                     <div className="stat-value">{stats.completed}</div>
-                    <div>Completed</div>
+                    <div className="text-sm font-semibold opacity-70">Completed</div>
                   </div>
                 </div>
-                <div className="progress-ring">
-                  <svg viewBox="0 0 120 120">
-                    <defs>
-                      <linearGradient
-                        id="progressGradient"
-                        x1="0%"
-                        y1="0%"
-                        x2="100%"
-                        y2="0%"
-                      >
-                        <stop offset="0%" stopColor="var(--accent)" />
-                        <stop offset="100%" stopColor="var(--success)" />
-                      </linearGradient>
-                    </defs>
-                    <circle
-                      className="progress-bg"
-                      cx="60"
-                      cy="60"
-                      r="52"
-                    ></circle>
-                    <circle
-                      className="progress-fill"
-                      cx="60"
-                      cy="60"
-                      r="52"
-                      strokeDasharray="327"
-                      strokeDashoffset={
-                        327 - (327 * stats.overallProgress) / 100
-                      }
-                    ></circle>
-                  </svg>
-                  <div className="progress-text">
-                    <div className="progress-num">{stats.overallProgress}%</div>
-                    <div>Overall</div>
-                  </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-orange-500">{stats.overallProgress}%</div>
+                  <div className="text-sm font-semibold opacity-70 uppercase tracking-wider">Overall Progress</div>
                 </div>
               </>
             );
@@ -302,6 +273,7 @@ function App() {
         </div>
         <div className="add-row">
           <select
+            className="flex-shrink-0"
             value={currentTopicStatus}
             onChange={(e) => setCurrentTopicStatus(e.target.value)}
           >
@@ -310,53 +282,51 @@ function App() {
             <option value="completed">Completed</option>
           </select>
           <input
+            className="flex-1"
             value={trackerInput}
             onChange={(e) => setTrackerInput(e.target.value)}
-            placeholder="Add new topic"
+            placeholder="What are you learning today?"
           />
-          <button onClick={addTopic}>Add Topic</button>
+          <button className="primary" onClick={addTopic}>Add Topic</button>
         </div>
         <div className="topics-list">
           {trackerTopics.map((t) => (
-            <div key={t.id} className={`topic-card ${t.status}`}>
+            <div key={t.id} className="topic-card">
               <div className="topic-top">
-                <h3>{t.name}</h3>
+                <h3 className="text-lg font-bold">{t.name}</h3>
                 <span className={`status-tag ${t.status}`}>
                   {t.status.toUpperCase()}
                 </span>
               </div>
               <div className="topic-progress">
-                <div className="progress-container">
-                  <div className="progress-bar-bg">
-                    <div
-                      className="progress-bar-fill"
-                      style={{ width: `${t.progress}%` }}
-                    ></div>
-                  </div>
-                  <span>{t.progress}%</span>
+                <div className="progress-bar-bg">
+                  <div
+                    className="progress-bar-fill"
+                    style={{ width: `${t.progress}%` }}
+                  ></div>
                 </div>
               </div>
               <div className="topic-actions">
                 <button
                   onClick={() => updateTopicStatus(t.id, "pending")}
-                  className={t.status === "pending" ? "active" : ""}
+                  className={`secondary text-xs ${t.status === "pending" ? "active" : ""}`}
                 >
                   Pending
                 </button>
                 <button
                   onClick={() => updateTopicStatus(t.id, "incomplete")}
-                  className={t.status === "incomplete" ? "active" : ""}
+                  className={`secondary text-xs ${t.status === "incomplete" ? "active" : ""}`}
                 >
                   Incomplete
                 </button>
                 <button
                   onClick={() => updateTopicStatus(t.id, "completed")}
-                  className={t.status === "completed" ? "active" : ""}
+                  className={`secondary text-xs ${t.status === "completed" ? "active" : ""}`}
                 >
                   Complete
                 </button>
                 <button
-                  className="delete-btn"
+                  className="danger text-xs ml-auto"
                   onClick={() => deleteTopic(t.id)}
                 >
                   Delete
@@ -372,19 +342,19 @@ function App() {
     ),
     settings: (
       <section className="page-content">
-        <h2>⚙️ Settings</h2>
+        <h2>Settings</h2>
         <div className="settings-list">
           <div className="setting-item">
-            <label>Theme</label>
+            <label>Appearance</label>
             <select value={theme} onChange={(e) => setTheme(e.target.value)}>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
+              <option value="dark">Dark Mode</option>
+              <option value="light">Light Mode</option>
             </select>
           </div>
-          <button className="danger" onClick={clearData}>
-            Clear All Data
-          </button>
-          <button onClick={exportData}>Export Data (JSON)</button>
+          <div className="flex gap-4">
+            <button className="secondary" onClick={exportData}>Export Data (JSON)</button>
+            <button className="danger" onClick={clearData}>Clear All Data</button>
+          </div>
         </div>
       </section>
     ),
@@ -393,8 +363,8 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>🚀 NEXUS</h1>
-        <p>AI Code Helper | Snippets | Learning Tracker</p>
+        <h1>NEXUS</h1>
+        <p>Your Professional AI Development Workspace</p>
       </header>
       <div className="app-container">
         <aside className="sidebar">
@@ -403,25 +373,25 @@ function App() {
               className={currentPage === "ai" ? "nav-active" : ""}
               onClick={() => setCurrentPage("ai")}
             >
-              <span>🤖</span> AI Helper
+              AI Helper
             </button>
             <button
               className={currentPage === "snippets" ? "nav-active" : ""}
               onClick={() => setCurrentPage("snippets")}
             >
-              <span>💾</span> Snippets
+              Code Snippets
             </button>
             <button
               className={currentPage === "tracker" ? "nav-active" : ""}
               onClick={() => setCurrentPage("tracker")}
             >
-              <span>📚</span> Learning Tracker
+              Learning Path
             </button>
             <button
               className={currentPage === "settings" ? "nav-active" : ""}
               onClick={() => setCurrentPage("settings")}
             >
-              <span>⚙️</span> Settings
+              Settings
             </button>
           </nav>
         </aside>
