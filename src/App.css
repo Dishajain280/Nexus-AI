@@ -1,4 +1,6 @@
+/* Minimal, safe styles for Nexus app (kept concise for build stability) */
 :root {
+<<<<<<< HEAD
   --bg: #0a0a0a;
   --surface: #141414;
   --surface-secondary: #1f1f1f;
@@ -27,29 +29,49 @@
   --glow: 0 0 15px rgba(249, 115, 22, 0.1);
 }
 
+=======
+  --bg: #0a0e27;
+  --surface: rgba(22, 33, 62, 0.85);
+  --text: #fff;
+  --accent: #00d4ff;
+  --border: rgba(255, 255, 255, 0.08);
+  --radius: 12px;
+  --glow: 0 8px 30px rgba(0, 212, 255, 0.12);
+}
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 * {
   box-sizing: border-box;
-  -webkit-font-smoothing: antialiased;
 }
-
 body {
   margin: 0;
+<<<<<<< HEAD
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
   transition: background 0.3s, color 0.3s;
+=======
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 }
-
 .app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+<<<<<<< HEAD
   background: var(--bg);
+=======
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 }
-
 .header {
   background: var(--surface);
+<<<<<<< HEAD
   padding: 1.25rem 2rem;
   border-bottom: 1px solid var(--border);
   text-align: left;
@@ -77,9 +99,23 @@ body {
   display: flex;
   flex: 1;
   height: calc(100vh - 88px);
+=======
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
 }
-
+.header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+.app-container {
+  display: flex;
+  flex: 1;
+  min-height: calc(100vh - 90px);
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
+}
 .sidebar {
+<<<<<<< HEAD
   width: 280px;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -87,16 +123,21 @@ body {
   flex-direction: column;
   padding: 1.5rem;
   gap: 1rem;
+=======
+  width: 260px;
+  padding: 1rem;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 }
-
 .sidebar nav {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
-
 .sidebar button {
   background: transparent;
+<<<<<<< HEAD
   border: none;
   color: var(--text-secondary);
   padding: 0.75rem 1rem;
@@ -120,16 +161,31 @@ body {
   background: var(--accent);
   color: white !important;
   box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+=======
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
 }
-
+.sidebar .nav-active {
+  background: linear-gradient(90deg, var(--accent), #00b8d4);
+  color: #001;
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
+}
 .main-content {
   flex: 1;
+<<<<<<< HEAD
   background: var(--bg);
   padding: 2.5rem;
   overflow-y: auto;
+=======
+  padding: 1.5rem;
+  overflow: auto;
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 }
-
 .page-content {
+<<<<<<< HEAD
   max-width: 1000px;
   margin: 0 auto;
 }
@@ -267,10 +323,20 @@ body {
   gap: 1rem;
 }
 
+=======
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.input-section,
+.response-section,
+.item-card,
+.dashboard,
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 .topic-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+<<<<<<< HEAD
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
@@ -352,4 +418,55 @@ input, select {
   .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
   .main-content { padding: 1.5rem; }
   .stats-row { grid-template-columns: 1fr; }
+=======
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+textarea,
+input,
+select {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+}
+button {
+  cursor: pointer;
+}
+.code-block {
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.12);
+  padding: 1rem;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+.items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.topic-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.empty-state {
+  text-align: center;
+  color: #9aa;
+}
+@media (max-width: 800px) {
+  .app-container {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+>>>>>>> 85d9ddb472ce82a42d0ad1abaaa228dc2217a080
 }
