@@ -565,6 +565,30 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .ai-history-card:hover { border-color: var(--accent); background: var(--accent-glow-sm); }
 .ai-history-card-time { font-size: .65rem; color: var(--text-dim); margin-bottom: .2rem; }
 .ai-history-card-prompt { font-size: .8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-history-card-open { font-size: .68rem; color: var(--accent); margin-top: .3rem; font-weight: 600; }
+
+/* Shared-snippet banner (#/s/ links) */
+.shared-banner {
+  position: fixed; top: .75rem; left: 50%; transform: translateX(-50%);
+  z-index: 60; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  max-width: min(92vw, 640px); padding: .6rem .9rem;
+  background: var(--panel-bg); border: 1px solid var(--accent);
+  border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+.shared-banner-text { font-size: .82rem; color: var(--text); }
+.shared-banner-actions { display: flex; gap: .4rem; }
+
+/* Topic notes modal */
+.notes-body { font-size: .85rem; color: var(--text); white-space: pre-wrap; max-height: 50vh; overflow-y: auto; }
+.notes-body.notes-empty { color: var(--text-dim); font-style: italic; }
+
+/* Daily review (spaced repetition) */
+.review-topic { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: .35rem; }
+.review-hint { font-size: .8rem; color: var(--text-dim); }
+.review-cta-panel { border-color: var(--accent); }
+.review-cta-text { font-size: .82rem; color: var(--text-muted); margin-bottom: .6rem; }
+.tracker-add-btn.review-btn { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.tracker-add-btn.review-btn:hover { background: var(--accent-glow-sm); }
 
 .quick-action-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: .6rem;

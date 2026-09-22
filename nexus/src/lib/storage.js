@@ -10,6 +10,8 @@ export const storageKeys = {
   theme: `${STORAGE_PREFIX}theme`,
   chatMessages: `${STORAGE_PREFIX}chatMessages`,
   aiHistory: `${STORAGE_PREFIX}aiHistory`,
+  threads: `${STORAGE_PREFIX}threads`,
+  lastExport: `${STORAGE_PREFIX}lastExport`,
 };
 
 // Unprefixed keys written by older versions of the app.
@@ -74,11 +76,41 @@ export function normalizeTopic(topic) {
     status: VALID_STATUSES.includes(topic.status) ? topic.status : "pending",
     notes: typeof topic.notes === "string" ? topic.notes : "",
     date: typeof topic.date === "string" ? topic.date : "",
+    learnedAt:
+      typeof topic.learnedAt === "string" && !Number.isNaN(Date.parse(topic.learnedAt))
+        ? topic.learnedAt
+        : "",
     subTasks: Array.isArray(topic.subTasks) ? topic.subTasks : [],
     progress: Number.isFinite(progress)
       ? Math.min(100, Math.max(0, Math.round(progress)))
       : 0,
   };
+}
+
+// Restorable AI conversation threads. Messages use the same shape as
+// chatMessages ({role, content, toolEvents?}) so restoring is a state swap.
+// Returns null for anything unusable — callers filter it out.
+export function normalizeThread(thread) {
+  if (!thread || typeof thread !== "object") return null;
+  if (typeof thread.id !== "string" || !thread.id) return null;
+  const messages = Array.isArray(thread.messages)
+    ? thread.messages
+        .filter((m) => m && typeof m === "object" && (m.role === "user" || m.role === "assistant"))
+        .map((m) => ({
+          role: m.role,
+          content: typeof m.content === "string" ? m.content : "",
+          ...(Array.isArray(m.toolEvents) ? { toolEvents: m.toolEvents } : {}),
+        }))
+        .slice(-MAX_CHAT_MESSAGES)
+    : [];
+  if (messages.length === 0) return null;
+  const firstUser = messages.find((m) => m.role === "user" && m.content);
+  const title = (firstUser?.content || "Untitled chat").replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled chat";
+  const at =
+    typeof thread.at === "string" && !Number.isNaN(Date.parse(thread.at))
+      ? thread.at
+      : new Date().toISOString();
+  return { id: thread.id, title, messages, at };
 }
 
 export function normalizeSnippet(snippet) {
@@ -158,6 +190,8 @@ export function clearAppData() {
     storageKeys.tracker,
     storageKeys.chatMessages,
     storageKeys.aiHistory,
+    storageKeys.threads,
+    storageKeys.lastExport,
     LEGACY_KEYS.snippets,
     LEGACY_KEYS.tracker,
   ];

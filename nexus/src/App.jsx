@@ -20,10 +20,12 @@ import {
   uid,
   normalizeSnippet,
   normalizeTopic,
+  normalizeThread,
   MAX_CHAT_MESSAGES,
   readJSON,
 } from "./lib/storage.js";
 import { parseSegments, extractFirstCodeBlock } from "./lib/markdown.js";
+import { encodeSnippetToHash, decodeSnippetFromHash } from "./lib/share.js";
 import { semanticSearch } from "./lib/semantic.js";
 
 /* ================================================================
@@ -289,9 +291,19 @@ function LandingPage() {
             <a className="btn btn-secondary" href="#features">Learn More</a>
           </div>
           <div className="hero-stats">
-            <div className="hero-stat"><div className="hero-stat-value">{liveStats.snippets}</div><div className="hero-stat-label">Your Snippets</div></div>
-            <div className="hero-stat"><div className="hero-stat-value">{liveStats.topics}</div><div className="hero-stat-label">Your Topics</div></div>
-            <div className="hero-stat"><div className="hero-stat-value">{liveStats.progress}%</div><div className="hero-stat-label">Learning Progress</div></div>
+            {liveStats.snippets > 0 || liveStats.topics > 0 ? (
+              <>
+                <div className="hero-stat"><div className="hero-stat-value">{liveStats.snippets}</div><div className="hero-stat-label">Your Snippets</div></div>
+                <div className="hero-stat"><div className="hero-stat-value">{liveStats.topics}</div><div className="hero-stat-label">Your Topics</div></div>
+                <div className="hero-stat"><div className="hero-stat-value">{liveStats.progress}%</div><div className="hero-stat-label">Learning Progress</div></div>
+              </>
+            ) : (
+              <>
+                <div className="hero-stat"><div className="hero-stat-label">Your snippets, one search away</div></div>
+                <div className="hero-stat"><div className="hero-stat-label">An AI that edits your workspace</div></div>
+                <div className="hero-stat"><div className="hero-stat-label">A tracker that builds streaks</div></div>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -312,38 +324,6 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="section section-alt">
-        <div className="section-header">
-          <h2>See It In Action</h2>
-          <p>A fast, focused interface built for developer flow.</p>
-        </div>
-        <div className="preview-container">
-          <div className="preview-bar">
-            <span className="preview-dot" /><span className="preview-dot" /><span className="preview-dot" />
-          </div>
-          <div className="preview-body">
-            <div className="preview-sidebar">
-              <div className="preview-sidebar-item active">🤖 AI Helper</div>
-              <div className="preview-sidebar-item">💾 Snippets</div>
-              <div className="preview-sidebar-item">📚 Tracker</div>
-              <div className="preview-sidebar-item">⚙️ Settings</div>
-            </div>
-            <div className="preview-main">
-              <div className="preview-card-row">
-                <div className="preview-mini-card"><div className="num">12</div><div className="label">Snippets</div></div>
-                <div className="preview-mini-card"><div className="num">8</div><div className="label">Topics</div></div>
-                <div className="preview-mini-card"><div className="num">67%</div><div className="label">Progress</div></div>
-              </div>
-              <div className="preview-chart" aria-hidden="true">
-                {[35, 55, 40, 70, 50, 80, 45, 65, 75, 90].map((h, i) => (
-                  <div key={i} className="preview-chart-bar" style={{ left: `${i * 10}%`, width: "8%", height: `${h}%` }} />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section className="section">
         <div className="section-header reveal">
           <h2>Why NEXUS</h2>
@@ -353,7 +333,7 @@ function LandingPage() {
           {[
             { value: "3-in-1", label: "AI assistant, snippet manager, and learning tracker in one workspace" },
             { value: "100%", label: "Of your data stays local — private by default, exportable anytime" },
-            { value: "8+", label: "Built-in prompt templates for common development tasks" },
+            { value: "3", label: "Built-in workflows: AI helper, snippet library, learning tracker" },
           ].map((m) => (
             <div key={m.label} className="metric-card">
               <div className="metric-value">{m.value}</div>
@@ -429,6 +409,7 @@ const PROMPT_TEMPLATES = [
    App Shell
    ================================================================ */
 const VALID_PAGES = ["home", "ai", "snippets", "tracker", "settings"];
+const APP_VERSION = "2.4.0";
 
 function AppShell() {
   const navigate = useNavigate();
@@ -442,13 +423,12 @@ function AppShell() {
   const [trackerInput, setTrackerInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [snippets, setSnippets] = useState(() =>
-    isStorageAvailable() ? loadList([storageKeys.snippets, "codeSnippets"], normalizeSnippet) : [],
+    isStorageAvailable() ?  loadList([storageKeys.snippets, "codeSnippets"], normalizeSnippet) : [],
   );
   const [snippetName, setSnippetName] = useState("");
   const [trackerTopics, setTrackerTopics] = useState(() =>
     isStorageAvailable() ? loadList([storageKeys.tracker, "learningTracker"], normalizeTopic) : [],
   );
-  const [currentTopicStatus, setCurrentTopicStatus] = useState("pending");
   const [storageWarning, setStorageWarning] = useState(() => !isStorageAvailable());
   const [confirmState, setConfirmState] = useState(null);
   const [editingSnippetId, setEditingSnippetId] = useState(null);
@@ -465,6 +445,19 @@ function AppShell() {
     const saved = readJSON(storageKeys.aiHistory);
     return Array.isArray(saved) ? saved.slice(0, 50) : [];
   });
+  // Restorable conversation threads (persisted, reopenable from the dashboard).
+  const [threads, setThreads] = useState(() =>
+    isStorageAvailable() ? loadList([storageKeys.threads], normalizeThread) : [],
+  );
+  // Daily review mode (spaced repetition over the learning tracker).
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState([]);
+  const [reviewIdx, setReviewIdx] = useState(0);
+  const [reviewResults, setReviewResults] = useState(null);
+  // Shared-snippet links: #/s/<payload> carries a full snippet in the URL.
+  const [sharedSnippet, setSharedSnippet] = useState(null);
+  // Notes viewer for tracker topics (the AI bridge writes these).
+  const [notesModalId, setNotesModalId] = useState(null);
   const [subTaskInputs, setSubTaskInputs] = useState({});
   const [chatMessages, setChatMessages] = useState(() => {
     if (!isStorageAvailable()) return [];
@@ -502,12 +495,37 @@ function AppShell() {
       queueMicrotask(() => setStorageWarning(true));
     }
   }, [aiHistory]);
+  useEffect(() => {
+    if (!safeSave(storageKeys.threads, threads.slice(0, 50))) {
+      queueMicrotask(() => setStorageWarning(true));
+    }
+  }, [threads]);
+
+  // Snapshot each finished exchange as a restorable thread. Runs when an
+  // assistant message lands, so tool-call rounds end up in the final version.
+  const threadIdRef = useRef(uid());
+  useEffect(() => {
+    const last = chatMessages[chatMessages.length - 1];
+    if (!last || last.role !== "assistant" || !last.content) return;
+    const firstUser = chatMessages.find((m) => m.role === "user" && m.content);
+    if (!firstUser) return; // notices/aborts only — not a conversation
+    const entry = {
+      id: threadIdRef.current,
+      title: firstUser.content.replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled chat",
+      messages: chatMessages,
+      at: new Date().toISOString(),
+    };
+    setThreads((prev) => [entry, ...prev.filter((t) => t.id !== entry.id)].slice(0, 50));
+  }, [chatMessages]);
 
   // ---- Cross-tab sync ----
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key === storageKeys.snippets) setSnippets(parseList(e.newValue, normalizeSnippet));
       else if (e.key === storageKeys.tracker) setTrackerTopics(parseList(e.newValue, normalizeTopic));
+      else if (e.key === storageKeys.threads) setThreads(parseList(e.newValue, normalizeThread));
+      else if (e.key === storageKeys.chatMessages)
+        setChatMessages(parseList(e.newValue, (m) => (m && (m.role === "user" || m.role === "assistant") ? m : null)));
       else if (e.key === storageKeys.theme) {
         try { const next = JSON.parse(e.newValue); if (next === "dark" || next === "light") setTheme(next); } catch { /* ignore malformed theme */ }
       }
@@ -522,6 +540,18 @@ function AppShell() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, loading]);
+
+  // Shared-snippet links: #/s/<base64url> puts a whole snippet in the URL
+  // fragment — nothing is uploaded, sharing needs no backend.
+  useEffect(() => {
+    const apply = () => {
+      const data = decodeSnippetFromHash(window.location.hash);
+      setSharedSnippet(data);
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
 
   // Esc toggles the sidebar (the shortcut the Dashboard/Settings docs promise).
   // When a dialog is open, Esc belongs to the dialog — mirrored through a ref
@@ -621,7 +651,16 @@ function AppShell() {
         if (!name) return { ok: false, error: "name was empty" };
         setTrackerTopics((prev) => [
           ...prev,
-          { id: uid(), name, status: "incomplete", notes: String(args.notes || "").slice(0, 500), date: new Date().toLocaleDateString(), subTasks: [], progress: 0 },
+          {
+            id: uid(),
+            name,
+            status: "incomplete",
+            notes: String(args.notes || "").slice(0, 500),
+            date: new Date().toLocaleDateString(),
+            learnedAt: new Date().toISOString(),
+            subTasks: [],
+            progress: 0,
+          },
         ]);
         return { ok: true, added: name };
       }
@@ -736,8 +775,10 @@ function AppShell() {
 
   const handleSend = async () => {
     if (!aiPrompt.trim() || loading) return;
-    setAiPrompt("");
-    await sendPrompt(aiPrompt);
+    const text = aiPrompt;
+    await sendPrompt(text);
+    // Clear only on success — failed sends stay in the box for a retry.
+    setAiPrompt((cur) => (cur === text ? "" : cur));
   };
 
   const regenerateLast = async () => {
@@ -756,12 +797,57 @@ function AppShell() {
     setChatMessages((prev) => [...prev, { role: "assistant", content: "⏹️ Request cancelled." }]);
   };
 
+  const handleRestoreThread = (id) => {
+    const thread = threads.find((t) => t.id === id);
+    if (!thread) return;
+    threadIdRef.current = thread.id;
+    setChatMessages(thread.messages);
+    setAiPrompt("");
+    setCurrentPage("ai");
+    showToast("Conversation restored");
+  };
+
   const addToHistory = (prompt) => {
     const now = new Date();
     setAiHistory((prev) => [
       { id: uid(), prompt: prompt.slice(0, 120), time: now.toLocaleTimeString(), at: now.getTime() },
       ...prev.slice(0, 49),
     ]);
+  };
+
+  // ---- Review mode: spaced repetition over tracker topics ----
+  const isReviewDue = (t) => {
+    const ts = Date.parse(t?.learnedAt || t?.date);
+    if (Number.isNaN(ts)) return false;
+    const days = Math.floor((Date.now() - ts) / 86400000);
+    return days >= 1 && days <= 60;
+  };
+
+  const handleStartReview = () => {
+    const due = trackerTopics.filter(isReviewDue);
+    if (due.length === 0) {
+      showToast("Nothing due for review yet — add a topic or come back tomorrow", { kind: "info" });
+      return;
+    }
+    // Least-recently-learned first; cap keeps sessions short.
+    due.sort((a, b) => Date.parse(a.learnedAt || a.date) - Date.parse(b.learnedAt || b.date));
+    setReviewQueue(due.slice(0, 10));
+    setReviewIdx(0);
+    setReviewResults(null);
+    setReviewOpen(true);
+  };
+
+  const recordReview = (remembered) => {
+    const topic = reviewQueue[reviewIdx];
+    if (topic) setReviewResults((prev) => [...(prev || []), { name: topic.name, remembered }]);
+    if (reviewIdx + 1 >= reviewQueue.length) {
+      setReviewOpen(false);
+      const results = [...(reviewResults || []), ...(topic ? [{ name: topic.name, remembered }] : [])];
+      const got = results.filter((r) => r.remembered).length;
+      showToast("Review done: " + got + "/" + results.length + " recalled", { kind: "success" });
+    } else {
+      setReviewIdx(reviewIdx + 1);
+    }
   };
 
   // ---- Sub-task helpers ----
@@ -821,7 +907,16 @@ function AppShell() {
       .slice(0, 60) || "AI topic";
     setTrackerTopics((prev) => [
       ...prev,
-      { id: uid(), name, status: "incomplete", notes: lastAiMessage.slice(0, 500), date: new Date().toLocaleDateString(), subTasks: [], progress: 0 },
+      {
+        id: uid(),
+        name,
+        status: "incomplete",
+        notes: lastAiMessage.slice(0, 500),
+        date: new Date().toLocaleDateString(),
+        learnedAt: new Date().toISOString(),
+        subTasks: [],
+        progress: 0,
+      },
     ]);
     showToast(`Added "${name}" to Learning Tracker`);
   };
@@ -843,6 +938,34 @@ function AppShell() {
     },
     [showToast],
   );
+
+  // Ask the AI about a snippet: preloads the prompt and jumps to the chat.
+  const handleAskAboutSnippet = (snippet) => {
+    if (!snippet) return;
+    const code = (snippet.code || "").slice(0, 2000);
+    setAiPrompt("Explain this code, then list its edge cases:\n```\n" + code + "\n```");
+    setCurrentPage("ai");
+    showToast("Snippet loaded into the AI helper — press Send");
+  };
+
+  // Share via URL fragment — zero backend, nothing leaves the browser.
+  const handleShareSnippet = (snippet) => {
+    if (!snippet) return;
+    const url = window.location.origin + window.location.pathname + "#" + encodeSnippetToHash(snippet);
+    if (navigator.share) {
+      navigator.share({ title: snippet.name + " — NEXUS snippet", url }).catch(() => {});
+    } else {
+      copyText(url, "Share link copied");
+    }
+  };
+
+  const handleImportShared = (data) => {
+    const snippet = { id: uid(), name: data.name, code: data.code, tags: data.tags || [] };
+    setSnippets((prev) => [snippet, ...prev]);
+    setSharedSnippet(null);
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    showToast("Imported \"" + data.name + "\" from the shared link");
+  };
 
   const deleteSnippetWithUndo = (id) => {
     const index = snippets.findIndex((s) => s.id === id);
@@ -869,9 +992,10 @@ function AppShell() {
   const addTopic = () => {
     const name = trackerInput.trim();
     if (!name) return;
+    // New topics always start pending — status changes live on the card buttons.
     setTrackerTopics([
       ...trackerTopics,
-      { id: uid(), name, status: currentTopicStatus, notes: "", date: new Date().toLocaleDateString(), subTasks: [], progress: 0 },
+      { id: uid(), name, status: "pending", notes: "", date: new Date().toLocaleDateString(), learnedAt: new Date().toISOString(), subTasks: [], progress: 0 },
     ]);
     setTrackerInput("");
   };
@@ -890,6 +1014,12 @@ function AppShell() {
     });
   };
 
+  const ageInDays = (topic) => {
+    const ts = Date.parse(topic?.learnedAt || topic?.date);
+    if (Number.isNaN(ts)) return null;
+    return Math.floor((Date.now() - ts) / 86400000);
+  };
+
   const getStats = () => {
     const total = trackerTopics.length;
     const completed = trackerTopics.filter((t) => t.status === "completed").length;
@@ -904,16 +1034,17 @@ function AppShell() {
       title: "Clear all data?",
       message: "This permanently deletes all snippets and learning topics from this browser. Your theme is kept. Export a backup first if you're unsure.",
       confirmLabel: "Delete everything",
-      action: () => { setSnippets([]); setTrackerTopics([]); setAiHistory([]); setChatMessages([]); clearAppData(); showToast("All data cleared"); },
+      action: () => { setSnippets([]); setTrackerTopics([]); setAiHistory([]); setChatMessages([]); setThreads([]); clearAppData(); showToast("All data cleared"); },
     });
 
   const exportData = () => {
-    const data = { snippets, tracker: trackerTopics };
+    const data = { version: 2, exportedAt: new Date().toISOString(), snippets, tracker: trackerTopics, threads };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;
     a.download = `nexus-data-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(url);
+    try { safeSave(storageKeys.lastExport, new Date().toISOString()); } catch { /* ignore */ }
     showToast("Export downloaded");
   };
 
@@ -931,12 +1062,20 @@ function AppShell() {
         }
         const importedSnippets = (snippetsIn || []).map(normalizeSnippet).filter(Boolean);
         const importedTopics = (topicsIn || []).map(normalizeTopic).filter(Boolean);
+        const importedThreads = Array.isArray(parsed.threads)
+          ? parsed.threads.map(normalizeThread).filter(Boolean)
+          : [];
         const byId = new Map(snippets.map((s) => [String(s.id), s]));
         for (const s of importedSnippets) byId.set(String(s.id), s);
         setSnippets([...byId.values()]);
         const topicById = new Map(trackerTopics.map((t) => [String(t.id), t]));
         for (const t of importedTopics) topicById.set(String(t.id), t);
         setTrackerTopics([...topicById.values()]);
+        if (importedThreads.length > 0) {
+          const threadById = new Map(threads.map((t) => [String(t.id), t]));
+          for (const t of importedThreads) threadById.set(String(t.id), t);
+          setThreads([...threadById.values()]);
+        }
         showToast(`Imported ${importedSnippets.length} snippet(s) and ${importedTopics.length} topic(s)`);
       } catch {
         showToast("Could not read that file", { kind: "undo" });
@@ -1130,90 +1269,6 @@ function AppShell() {
             </div>
           </div>
 
-          {/* Recent Activity */}
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h3>📋 Recent Activity</h3>
-            </div>
-            <div className="dashboard-panel-body">
-              {aiHistory.length === 0 && snippets.length === 0 && trackerTopics.length === 0 ? (
-                <div className="activity-list">
-                  <div className="activity-item">
-                    <span className="activity-dot orange" />
-                    <span>No activity yet — start by asking AI or saving a snippet!</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="activity-list">
-                  {aiHistory.slice(0, 3).map((h) => (
-                    <div key={h.id} className="activity-item">
-                      <span className="activity-dot orange" />
-                      <span>Asked AI: {h.prompt}</span>
-                      <span className="activity-time">{h.time}</span>
-                    </div>
-                  ))}
-                  {snippets.slice(0, 2).map((s) => (
-                    <div key={s.id} className="activity-item">
-                      <span className="activity-dot blue" />
-                      <span>Saved snippet: {s.name}</span>
-                    </div>
-                  ))}
-                  {trackerTopics.filter((t) => t.status === "completed").slice(0, 2).map((t) => (
-                    <div key={t.id} className="activity-item">
-                      <span className="activity-dot green" />
-                      <span>Completed: {t.name}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Dev Tips */}
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h3>💡 Developer Tips</h3>
-            </div>
-            <div className="dashboard-panel-body">
-              <div className="tips-list">
-                {[
-                  { icon: "⌨️", text: "Press Ctrl+Enter to send AI prompts instantly" },
-                  { icon: "🔍", text: "Use the search bar to find snippets by name or code content" },
-                  { icon: "📊", text: "Drag the progress slider on tracker topics to update completion" },
-                  { icon: "📋", text: "Save AI responses as snippets for quick reuse later" },
-                  { icon: "💡", text: "Use prompt templates to get started faster with common patterns" },
-                ].map((tip, i) => (
-                  <div key={i} className="tip-item">
-                    <span className="tip-icon" aria-hidden="true">{tip.icon}</span>
-                    <span className="tip-text">{tip.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Keyboard Shortcuts Quick Ref */}
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h3>⌨️ Shortcuts</h3>
-            </div>
-            <div className="dashboard-panel-body">
-              <div className="shortcuts-list">
-                {[
-                  ["Send AI prompt", "Ctrl + Enter"],
-                  ["Add topic", "Enter"],
-                  ["Save snippet", "Enter"],
-                  ["Toggle sidebar", "Esc"],
-                ].map(([action, keys]) => (
-                  <div key={action} className="shortcut-row">
-                    <span>{action}</span>
-                    <span className="shortcut-keys"><kbd className="kbd">{keys}</kbd></span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
           {/* Activity Streak & Heatmap */}
           <div className="dashboard-panel">
             <div className="dashboard-panel-header">
@@ -1235,25 +1290,41 @@ function AppShell() {
             </div>
           </div>
 
-          {/* AI Chat History */}
-          <div className="dashboard-panel" style={{ gridColumn: aiHistory.length > 0 ? "1 / -1" : undefined }}>
+          {/* Daily review — spaced repetition */}
+          {trackerTopics.some(isReviewDue) && (
+            <div className="dashboard-panel review-cta-panel">
+              <div className="dashboard-panel-header">
+                <h3>🧠 Daily Review</h3>
+              </div>
+              <div className="dashboard-panel-body">
+                <p className="review-cta-text">
+                  {trackerTopics.filter(isReviewDue).length} topic{trackerTopics.filter(isReviewDue).length !== 1 ? "s" : ""} ready for a recall check — keep the streak alive.
+                </p>
+                <button className="settings-btn primary" onClick={handleStartReview}>Start review</button>
+              </div>
+            </div>
+          )}
+
+          {/* AI conversations — restorable */}
+          <div className="dashboard-panel" style={{ gridColumn: threads.length > 0 ? "1 / -1" : undefined }}>
             <div className="dashboard-panel-header">
-              <h3>🤖 AI History</h3>
-              {aiHistory.length > 0 && (
-                <button className="btn-ghost" style={{ fontSize: ".72rem", padding: ".2rem .5rem" }} onClick={() => setAiHistory([])}>Clear</button>
+              <h3>🤖 AI Conversations</h3>
+              {threads.length > 0 && (
+                <button className="btn-ghost" style={{ fontSize: ".72rem", padding: ".2rem .5rem" }} onClick={() => setThreads([])}>Clear</button>
               )}
             </div>
             <div className="dashboard-panel-body">
-              {aiHistory.length === 0 ? (
+              {threads.length === 0 ? (
                 <div className="activity-list">
                   <div className="activity-item"><span className="activity-dot orange" /><span>No AI conversations yet — try the AI Helper!</span></div>
                 </div>
               ) : (
                 <div className="ai-history-grid">
-                  {aiHistory.slice(0, 6).map((h) => (
-                    <button key={h.id} className="ai-history-card" onClick={() => setCurrentPage("ai")}>
-                      <div className="ai-history-card-time">{h.time}</div>
-                      <div className="ai-history-card-prompt">{h.prompt}</div>
+                  {threads.slice(0, 6).map((t) => (
+                    <button key={t.id} className="ai-history-card" onClick={() => handleRestoreThread(t.id)} title="Reopen this conversation">
+                      <div className="ai-history-card-time">{new Date(t.at).toLocaleString()}</div>
+                      <div className="ai-history-card-prompt">{t.title}</div>
+                      <div className="ai-history-card-open">Reopen ↩</div>
                     </button>
                   ))}
                 </div>
@@ -1273,7 +1344,7 @@ function AppShell() {
                   { label: "Save your first snippet", done: snippets.length > 0, action: () => setCurrentPage("ai") },
                   { label: "Add a learning topic", done: trackerTopics.length > 0, action: () => setCurrentPage("tracker") },
                   { label: "Complete a topic", done: stats.completed > 0, action: () => setCurrentPage("tracker") },
-                  { label: "Export your data", done: false, action: () => setCurrentPage("settings") },
+                  { label: "Export your data", done: Boolean(readJSON(storageKeys.lastExport)), action: () => setCurrentPage("settings") },
                 ].map((item, i) => (
                   <button key={i} className={`checklist-item ${item.done ? "done" : ""}`} onClick={item.action}>
                     <span className="checklist-check" aria-hidden="true">{item.done ? "✅" : "⬜"}</span>
@@ -1300,7 +1371,7 @@ function AppShell() {
             <span className="ai-context-badge" title="The AI sees your recent messages as context">🔗 Multi-turn memory</span>
           )}
           {chatMessages.length > 0 && (
-            <button className="btn-ghost" onClick={() => { setChatMessages([]); }} style={{ fontSize: ".78rem", padding: ".35rem .7rem", flexShrink: 0 }}>
+            <button className="btn-ghost" onClick={() => { setChatMessages([]); threadIdRef.current = uid(); }} style={{ fontSize: ".78rem", padding: ".35rem .7rem", flexShrink: 0 }}>
               🗑️ New Chat
             </button>
           )}
@@ -1479,6 +1550,8 @@ function AppShell() {
                 <div className="snippet-card-footer">
                   <button onClick={() => setEditingSnippetId(s.id)}>✏️ View</button>
                   <button onClick={() => copyText(s.code, "Code copied")}>📋 Copy</button>
+                  <button onClick={() => handleAskAboutSnippet(s)} title="Ask the AI to explain this snippet">🤖 Ask AI</button>
+                  <button onClick={() => handleShareSnippet(s)} title="Copy a share link">🔗 Share</button>
                   <button className="danger" onClick={() => deleteSnippetWithUndo(s.id)}>🗑️ Delete</button>
                 </div>
               </div>
@@ -1539,14 +1612,10 @@ function AppShell() {
         </div>
 
         <div className="tracker-add-row">
-          <select aria-label="Status for new topic" value={currentTopicStatus} onChange={(e) => setCurrentTopicStatus(e.target.value)}>
-            <option value="pending">Pending</option>
-            <option value="incomplete">In Progress</option>
-            <option value="completed">Completed</option>
-          </select>
           <input aria-label="New topic name" value={trackerInput} onChange={(e) => setTrackerInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addTopic(); }} placeholder="Add new learning topic..." />
           <button className="tracker-add-btn" onClick={addTopic}>+ Add</button>
+          <button className="tracker-add-btn review-btn" onClick={handleStartReview} title="Spaced-repetition recall check">🧠 Review</button>
         </div>
 
         <div className="tracker-filter-row" role="group" aria-label="Filter topics">
@@ -1598,6 +1667,7 @@ function AppShell() {
                 </div>
 
                 <div className="topic-actions">
+                  <button onClick={() => setNotesModalId(t.id)} title="View notes">📝 Notes</button>
                   <button onClick={() => updateTopicStatus(t.id, "pending")} className={t.status === "pending" ? "active" : ""} aria-pressed={t.status === "pending"}>Pending</button>
                   <button onClick={() => updateTopicStatus(t.id, "incomplete")} className={t.status === "incomplete" ? "active" : ""} aria-pressed={t.status === "incomplete"}>In Progress</button>
                   <button onClick={() => updateTopicStatus(t.id, "completed")} className={t.status === "completed" ? "active" : ""} aria-pressed={t.status === "completed"}>Completed</button>
@@ -1680,7 +1750,7 @@ function AppShell() {
             <h3><span className="card-icon">ℹ️</span> About NEXUS</h3>
             <div className="setting-row">
               <div className="setting-label">Version</div>
-              <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>2.0.0</span>
+              <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>{APP_VERSION}</span>
             </div>
             <div className="setting-row">
               <div className="setting-label">Snippets stored</div>
@@ -1777,6 +1847,49 @@ function AppShell() {
         <main className="main-content">{pageComponents[currentPage]}</main>
       </div>
 
+      {sharedSnippet && (
+        <div className="shared-banner" role="region" aria-label="Shared snippet">
+          <div className="shared-banner-text">
+            <strong>{sharedSnippet.name}</strong> was shared with you — import it into your library?
+          </div>
+          <div className="shared-banner-actions">
+            <button className="settings-btn primary" onClick={() => handleImportShared(sharedSnippet)}>Import</button>
+            <button className="settings-btn" onClick={() => { setSharedSnippet(null); history.replaceState(null, "", window.location.pathname + window.location.search); }}>Dismiss</button>
+          </div>
+        </div>
+      )}
+      {notesModalId !== null && (() => {
+        const topic = trackerTopics.find((t) => t.id === notesModalId);
+        const text = (topic?.notes || "").trim();
+        return (
+          <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setNotesModalId(null); }}>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="notes-title">
+              <h3 id="notes-title">📝 Notes — {topic?.name || "Topic"}</h3>
+              <div className="modal-body">
+                {text ? <p className="notes-body">{text}</p> : <p className="notes-body notes-empty">No notes yet. Ask the AI helper to &quot;add this as a topic&quot; and its explanation will land here.</p>}
+              </div>
+              <div className="modal-actions">
+                <button onClick={() => setNotesModalId(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {reviewOpen && reviewQueue[reviewIdx] && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setReviewOpen(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="review-title">
+            <h3 id="review-title">🧠 Daily review — {reviewIdx + 1}/{reviewQueue.length}</h3>
+            <div className="modal-body">
+              <p className="review-topic">{reviewQueue[reviewIdx]?.name}</p>
+              <p className="review-hint">Learned {ageInDays(reviewQueue[reviewIdx]) ?? "?"}d ago — can you still explain it without looking?</p>
+            </div>
+            <div className="modal-actions">
+              <button onClick={() => recordReview(false)}>😵 Forgot</button>
+              <button className="primary" onClick={() => recordReview(true)}>✅ Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
       <ToastRegion toasts={toasts} onDismiss={dismissToast} />
       <ConfirmDialog dialog={confirmState}
         onConfirm={() => { confirmState?.action?.(); setConfirmState(null); }}
