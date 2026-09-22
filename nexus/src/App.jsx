@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Component } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -82,6 +82,46 @@ function ToastRegion({ toasts, onDismiss }) {
       ))}
     </div>
   );
+}
+
+/* ================================================================
+   Error Boundary — a render error must never white-screen the app
+   ================================================================ */
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("NEXUS render error:", error, info);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="error-boundary" role="alert">
+        <div className="error-boundary-icon" aria-hidden="true">💥</div>
+        <h1>Something went wrong</h1>
+        <p>
+          NEXUS hit an unexpected error. Your saved snippets and topics are
+          safe in this browser — reloading usually fixes it.
+        </p>
+        <pre className="error-boundary-details">
+          {String(this.state.error?.message || this.state.error)}
+        </pre>
+        <div className="error-boundary-actions">
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>
+            Reload NEXUS
+          </button>
+          <button className="btn btn-secondary" onClick={() => this.setState({ error: null })}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 /* ================================================================
@@ -171,26 +211,34 @@ const FEATURES = [
   { icon: "📊", title: "Analytics Dashboard", desc: "See at a glance how many snippets you've saved and your learning progress across topics." },
 ];
 
-const METRICS = [
-  { value: "40%", label: "Reduction in repetitive tasks" },
-  { value: "25 min", label: "Saved every day on average" },
-  { value: "25%", label: "Faster topic completion" },
-];
-
-const TESTIMONIALS = [
-  { name: "Sarah Chen", role: "Full-Stack Developer", initials: "SC", text: "NEXUS replaced three separate tools I used daily. The AI helper alone saves me an hour of boilerplate work every week." },
-  { name: "Marcus Rivera", role: "Junior Engineer", initials: "MR", text: "The learning tracker keeps me honest about what I'm studying. Seeing my progress ring fill up is genuinely motivating." },
-  { name: "Anya Patel", role: "DevOps Lead", initials: "AP", text: "Snippet storage with instant search is a game-changer. I stopped copy-pasting from old terminal scrolls." },
-];
-
 function LandingPage() {
   const navigate = useNavigate();
-  const theme = document.documentElement.dataset.theme || "dark";
+  // State-driven so the toggle icon re-renders immediately (bug: stale icon).
+  const [theme, setTheme] = useState(
+    () => document.documentElement.dataset.theme || readTheme() || "dark",
+  );
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("nexus:theme", JSON.stringify(next));
+    try {
+      localStorage.setItem("nexus:theme", JSON.stringify(next));
+    } catch {
+      // private mode — theme just won't persist
+    }
   };
+  // Live, honest stats from this browser's own storage — no invented numbers.
+  const [liveStats] = useState(() => {
+    if (!isStorageAvailable()) return { snippets: 0, topics: 0, progress: 0 };
+    const snips = loadList([storageKeys.snippets, "codeSnippets"], normalizeSnippet);
+    const topics = loadList([storageKeys.tracker, "learningTracker"], normalizeTopic);
+    const completed = topics.filter((t) => t.status === "completed").length;
+    return {
+      snippets: snips.length,
+      topics: topics.length,
+      progress: topics.length ? Math.round((completed / topics.length) * 100) : 0,
+    };
+  });
 
   return (
     <div className="landing">
@@ -226,9 +274,9 @@ function LandingPage() {
             <a className="btn btn-secondary" href="#features">Learn More</a>
           </div>
           <div className="hero-stats">
-            <div className="hero-stat"><div className="hero-stat-value">10K+</div><div className="hero-stat-label">Developers</div></div>
-            <div className="hero-stat"><div className="hero-stat-value">50K+</div><div className="hero-stat-label">Snippets Saved</div></div>
-            <div className="hero-stat"><div className="hero-stat-value">4.9★</div><div className="hero-stat-label">User Rating</div></div>
+            <div className="hero-stat"><div className="hero-stat-value">{liveStats.snippets}</div><div className="hero-stat-label">Your Snippets</div></div>
+            <div className="hero-stat"><div className="hero-stat-value">{liveStats.topics}</div><div className="hero-stat-label">Your Topics</div></div>
+            <div className="hero-stat"><div className="hero-stat-value">{liveStats.progress}%</div><div className="hero-stat-label">Learning Progress</div></div>
           </div>
         </div>
       </section>
@@ -283,11 +331,15 @@ function LandingPage() {
 
       <section className="section">
         <div className="section-header reveal">
-          <h2>Proven Results</h2>
-          <p>Real efficiency gains measured across development workflows.</p>
+          <h2>Why NEXUS</h2>
+          <p>Real capabilities, demonstrated — not invented numbers.</p>
         </div>
         <div className="metrics-grid">
-          {METRICS.map((m) => (
+          {[
+            { value: "3-in-1", label: "AI assistant, snippet manager, and learning tracker in one workspace" },
+            { value: "100%", label: "Of your data stays local — private by default, exportable anytime" },
+            { value: "8+", label: "Built-in prompt templates for common development tasks" },
+          ].map((m) => (
             <div key={m.label} className="metric-card">
               <div className="metric-value">{m.value}</div>
               <div className="metric-label">{m.label}</div>
@@ -298,16 +350,20 @@ function LandingPage() {
 
       <section className="section section-alt">
         <div className="section-header reveal">
-          <h2>What Developers Say</h2>
-          <p>Trusted by engineers building real products.</p>
+          <h2>Built Around Developer Workflows</h2>
+          <p>The daily loops NEXUS is designed to serve.</p>
         </div>
         <div className="testimonials-grid">
-          {TESTIMONIALS.map((t) => (
-            <div key={t.name} className="testimonial-card">
-              <p className="testimonial-text">{t.text}</p>
+          {[
+            { title: "Debugging a stubborn error", desc: "Paste the stack trace into the AI Helper, get a diagnosis with a fix, and save the working pattern as a snippet for next time.", icon: "🐛" },
+            { title: "Learning something new", desc: "Break a topic into sub-tasks in the Tracker, slide progress as you go, and watch the overall ring fill up.", icon: "📖" },
+            { title: "Reusing what you already wrote", desc: "Search every snippet by name or code content, copy it in one click, and stop scrolling old projects.", icon: "♻️" },
+          ].map((t) => (
+            <div key={t.title} className="testimonial-card">
+              <p className="testimonial-text">{t.desc}</p>
               <div className="testimonial-author">
-                <div className="testimonial-avatar" aria-hidden="true">{t.initials}</div>
-                <div><div className="testimonial-name">{t.name}</div><div className="testimonial-role">{t.role}</div></div>
+                <div className="testimonial-avatar" aria-hidden="true">{t.icon}</div>
+                <div><div className="testimonial-name">{t.title}</div><div className="testimonial-role">Core workflow</div></div>
               </div>
             </div>
           ))}
@@ -369,7 +425,6 @@ function AppShell() {
   const [theme, setTheme] = useState(() => readTheme() || "dark");
   const [aiPrompt, setAiPrompt] = useState("");
   const [trackerInput, setTrackerInput] = useState("");
-  const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [snippets, setSnippets] = useState(() =>
     isStorageAvailable() ? loadList([storageKeys.snippets, "codeSnippets"], normalizeSnippet) : [],
@@ -442,6 +497,22 @@ function AppShell() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, loading]);
 
+  // Esc toggles the sidebar (the shortcut the Dashboard/Settings docs promise).
+  // When a dialog is open, Esc belongs to the dialog — mirrored through a ref
+  // because a DOM query would race React's async re-render on the same event.
+  const modalOpenRef = useRef(false);
+  useEffect(() => {
+    modalOpenRef.current = confirmState != null || editingSnippetId != null;
+  }, [confirmState, editingSnippetId]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || modalOpenRef.current) return;
+      setSidebarOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ---- Gemini ----
   const handleSend = async () => {
     const prompt = aiPrompt.trim();
@@ -490,7 +561,6 @@ function AppShell() {
       }
 
       setChatMessages((prev) => [...prev, { role: "assistant", content: aiText }]);
-      setResponse(aiText);
     } catch (err) {
       if (err.name === "AbortError") return;
       setChatMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Failed to reach the AI service. Check your connection." }]);
@@ -539,10 +609,22 @@ function AppShell() {
   };
 
   // ---- Snippets ----
+  // The snippet-save bar operates on the latest AI reply — derived from the
+  // persisted chat, so it keeps working after a refresh ("response" state is
+  // stale legacy and is NOT restored on reload).
+  const lastAiMessage = (() => {
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      const m = chatMessages[i];
+      if (m.role === "assistant" && !m.content.startsWith("⚠️") && !m.content.startsWith("ℹ️") && !m.content.startsWith("⏹️")) return m.content;
+    }
+    return "";
+  })();
+
   const saveSnippet = () => {
     const name = snippetName.trim();
-    if (!name || !response) return;
-    setSnippets([{ id: uid(), name, code: response }, ...snippets]);
+    if (!name) { showToast("Give the snippet a name first", { kind: "undo" }); return; }
+    if (!lastAiMessage) { showToast("Nothing to save yet — ask the AI something first", { kind: "undo" }); return; }
+    setSnippets([{ id: uid(), name, code: lastAiMessage }, ...snippets]);
     setSnippetName("");
     showToast(`Saved "${name}"`);
   };
@@ -976,7 +1058,7 @@ function AppShell() {
             <div ref={chatEndRef} />
           </div>
 
-          {chatMessages.length > 0 && chatMessages[chatMessages.length - 1]?.role === "assistant" && chatMessages[chatMessages.length - 1]?.content && (
+          {lastAiMessage && (
             <div className="ai-response-actions">
               <label className="sr-only" htmlFor="snippet-name">Save as snippet</label>
               <input
@@ -987,8 +1069,8 @@ function AppShell() {
                 placeholder="Save as snippet..."
                 style={{ flex: 1, minWidth: 120, padding: '.35rem .55rem', fontSize: '.8rem', background: 'var(--input-bg)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text)' }}
               />
-              <button onClick={() => copyText(chatMessages[chatMessages.length - 1].content)}>📋 Copy all</button>
-              <button onClick={() => copyText(extractFirstCodeBlock(chatMessages[chatMessages.length - 1].content), "Code copied")}>📋 Copy code</button>
+              <button onClick={() => copyText(lastAiMessage)}>📋 Copy all</button>
+              <button onClick={() => copyText(extractFirstCodeBlock(lastAiMessage), "Code copied")}>📋 Copy code</button>
               <button onClick={saveSnippet} disabled={!snippetName.trim()} style={{ color: snippetName.trim() ? 'var(--accent)' : undefined }}>💾 Save</button>
             </div>
           )}
@@ -1375,12 +1457,14 @@ function AppShell() {
    ================================================================ */
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/:page" element={<AppShell />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/:page" element={<AppShell />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
