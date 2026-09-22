@@ -1,10 +1,15 @@
 // Vercel serverless function: POST /api/gemini
-// Vercel only auto-detects functions from a ROOT-level api/ directory,
-// so this adapter lives here and reuses the shared core in nexus/api/.
-// The Gemini API key never reaches the browser bundle.
+// Uses Vercel's WEB-STANDARD signature: a handler with a single Request
+// parameter that returns a Response. (Vercel's Node helper for the classic
+// (req, res) signature has .status()/.setHeader() but NO Express-style .set()
+// — which crashed with "res.status(...).set is not a function".)
+// Vercel and Netlify both support this exact signature.
 import { handleGeminiRequest } from "../nexus/api/gemini-core.js";
 
-export default async function handler(req, res) {
-  const { statusCode, headers, body } = await handleGeminiRequest(req);
-  res.status(statusCode).set(headers).end(body);
+export default async function handler(req) {
+  const { statusCode, headers, body } = await handleGeminiRequest({
+    method: req.method,
+    body: await req.text(),
+  });
+  return new Response(body, { status: statusCode, headers });
 }

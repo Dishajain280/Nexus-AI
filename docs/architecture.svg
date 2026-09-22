@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-label="NEXUS AI architecture diagram">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF5733"/>
+    </marker>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5DADE2"/>
+      <stop offset="1" stop-color="#2874A6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="560" fill="#212F3C"/>
+  <text x="600" y="48" text-anchor="middle" font-family="'Montserrat','Segoe UI',sans-serif" font-weight="700" font-size="26" fill="url(#title)">NEXUS AI — Architecture</text>
+
+  <!-- Browser column -->
+  <rect x="40" y="90" width="330" height="420" rx="16" fill="#1A2530" stroke="#2874A6" stroke-opacity="0.55"/>
+  <text x="205" y="122" text-anchor="middle" font-family="'Open Sans',sans-serif" font-weight="700" font-size="17" fill="#5DADE2">Browser</text>
+
+  <g font-family="'Open Sans',sans-serif" font-size="15" fill="#EAEAEA">
+    <rect x="70" y="145" width="270" height="86" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="205" y="178" text-anchor="middle" font-weight="700">React 19 SPA</text>
+    <text x="205" y="203" text-anchor="middle" fill="#B8C4CE" font-size="13">Landing · Dashboard · AI · Snippets · Tracker · Settings</text>
+
+    <rect x="70" y="255" width="270" height="86" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="205" y="288" text-anchor="middle" font-weight="700" fill="#FF8A5C">localStorage</text>
+    <text x="205" y="313" text-anchor="middle" fill="#B8C4CE" font-size="13">scoped keys · schema normalization · quota-safe</text>
+
+    <rect x="70" y="365" width="270" height="120" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="205" y="398" text-anchor="middle" font-weight="700">Resilience layer</text>
+    <text x="205" y="423" text-anchor="middle" fill="#B8C4CE" font-size="13">ErrorBoundary · AbortController</text>
+    <text x="205" y="444" text-anchor="middle" fill="#B8C4CE" font-size="13">theme pre-paint script · Esc/modal handler</text>
+    <text x="205" y="465" text-anchor="middle" fill="#B8C4CE" font-size="13">toasts with undo · confirm dialog</text>
+  </g>
+
+  <!-- Serverless column -->
+  <rect x="455" y="90" width="300" height="420" rx="16" fill="#1A2530" stroke="#FF5733" stroke-opacity="0.55"/>
+  <text x="605" y="122" text-anchor="middle" font-family="'Open Sans',sans-serif" font-weight="700" font-size="17" fill="#FF8A5C">Serverless (key stays here)</text>
+
+  <g font-family="'Open Sans',sans-serif" font-size="15" fill="#EAEAEA">
+    <rect x="485" y="150" width="240" height="104" rx="10" fill="#212F3C" stroke="#FF5733" stroke-opacity="0.5"/>
+    <text x="605" y="180" text-anchor="middle" font-weight="700">/api/gemini proxy</text>
+    <text x="605" y="205" text-anchor="middle" fill="#B8C4CE" font-size="13">Vercel api/gemini.js · Netlify gemini.mjs</text>
+    <text x="605" y="226" text-anchor="middle" fill="#B8C4CE" font-size="13">same shared core, two adapters</text>
+
+    <rect x="485" y="285" width="240" height="88" rx="10" fill="#212F3C" stroke="#FF5733" stroke-opacity="0.5"/>
+    <text x="605" y="315" text-anchor="middle" font-weight="700">Validation layer</text>
+    <text x="605" y="340" text-anchor="middle" fill="#B8C4CE" font-size="13">method · JSON · length caps</text>
+    <text x="605" y="361" text-anchor="middle" fill="#B8C4CE" font-size="13">upstream status passthrough</text>
+
+    <rect x="485" y="404" width="240" height="82" rx="10" fill="#212F3C" stroke="#FF5733" stroke-opacity="0.5"/>
+    <text x="605" y="434" text-anchor="middle" font-weight="700" fill="#FF8A5C">GEMINI_API_KEY</text>
+    <text x="605" y="459" text-anchor="middle" fill="#B8C4CE" font-size="13">env var · never in the bundle</text>
+  </g>
+
+  <!-- Gemini column -->
+  <rect x="840" y="90" width="320" height="420" rx="16" fill="#1A2530" stroke="#2874A6" stroke-opacity="0.55"/>
+  <text x="1000" y="122" text-anchor="middle" font-family="'Open Sans',sans-serif" font-weight="700" font-size="17" fill="#5DADE2">Google Gemini API</text>
+
+  <g font-family="'Open Sans',sans-serif" font-size="15" fill="#EAEAEA">
+    <rect x="870" y="150" width="260" height="104" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="1000" y="180" text-anchor="middle" font-weight="700">generateContent</text>
+    <text x="1000" y="205" text-anchor="middle" fill="#B8C4CE" font-size="13">gemini-3-flash-preview</text>
+    <text x="1000" y="226" text-anchor="middle" fill="#B8C4CE" font-size="13">candidates / finishReason</text>
+
+    <rect x="870" y="285" width="260" height="120" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="1000" y="315" text-anchor="middle" font-weight="700">Handled responses</text>
+    <text x="1000" y="340" text-anchor="middle" fill="#B8C4CE" font-size="13">SAFETY blocks → explained in chat</text>
+    <text x="1000" y="361" text-anchor="middle" fill="#B8C4CE" font-size="13">RECITATION → retry suggestion</text>
+    <text x="1000" y="382" text-anchor="middle" fill="#B8C4CE" font-size="13">quota / rate-limit errors surfaced</text>
+
+    <rect x="870" y="436" width="260" height="60" rx="10" fill="#212F3C" stroke="#2874A6" stroke-opacity="0.5"/>
+    <text x="1000" y="466" text-anchor="middle" fill="#B8C4CE" font-size="13">markdown → headings · lists · code</text>
+    <text x="1000" y="487" text-anchor="middle" fill="#B8C4CE" font-size="13">fences → highlighted blocks + copy</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#FF5733" stroke-width="2.5" fill="none" marker-end="url(#arrow)">
+    <line x1="370" y1="300" x2="455" y2="300"/>
+    <line x1="755" y1="300" x2="840" y2="300"/>
+  </g>
+  <g stroke="#2874A6" stroke-width="2" fill="none" opacity="0.85" marker-end="url(#arrow)">
+    <line x1="455" y1="380" x2="370" y2="380"/>
+    <line x1="840" y1="380" x2="755" y2="380"/>
+  </g>
+
+  <text x="412" y="288" text-anchor="middle" font-family="'Open Sans',sans-serif" font-size="12" fill="#B8C4CE">POST</text>
+  <text x="797" y="288" text-anchor="middle" font-family="'Open Sans',sans-serif" font-size="12" fill="#B8C4CE">fetch</text>
+  <text x="412" y="400" text-anchor="middle" font-family="'Open Sans',sans-serif" font-size="12" fill="#7FB3D5">JSON</text>
+  <text x="797" y="400" text-anchor="middle" font-family="'Open Sans',sans-serif" font-size="12" fill="#7FB3D5">JSON</text>
+
+  <text x="600" y="540" text-anchor="middle" font-family="'Open Sans',sans-serif" font-size="13" fill="#7FB3D5">State is 100% local (no database) — the only server dependency is the stateless proxy that keeps the API key off the client.</text>
+</svg>

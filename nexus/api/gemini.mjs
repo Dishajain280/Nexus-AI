@@ -13,6 +13,3 @@ export default async (req) => {
   const { statusCode, headers, body } = await handleGeminiRequest(req);
   return new Response(body, { status: statusCode, headers });
 };
-
-// httpMetadata for Vercel edge/node functions in a subdirectory context.
-export const config = { httpEndpoint: true };
