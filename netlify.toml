@@ -7,6 +7,7 @@ NODE_VERSION = "22"
 
 # Route /api/gemini to the Netlify function (nexus/api/gemini.mjs).
 # The file is named gemini.mjs so the deployed URL is /.netlify/functions/gemini.
+# (Vercel deploys are handled by /vercel.json + /api/gemini.js instead.)
 [functions]
 directory = "nexus/api"
 node_bundler = "esbuild"
