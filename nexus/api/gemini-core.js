@@ -1,10 +1,14 @@
 // Shared serverless core for the /api/gemini proxy.
 // The Gemini API key never ships to the browser: the client calls /api/gemini
-// and this module forwards the prompt to Google with the key attached
+// and this module forwards the request to Google with the key attached
 // server-side. Works on Vercel, Netlify, and the Vite dev server.
+// Supports both single-turn prompts and multi-turn conversations (`contents`).
 
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
+
+const MAX_PROMPT_CHARS = 8000;
+const MAX_TURNS = 24;
 
 export function getApiKey() {
   // Vercel/Netlify/dotenv all use GEMINI_API_KEY.
@@ -19,8 +23,7 @@ function json(body, status = 200) {
   };
 }
 
-// Normalized handler: (req-like { method, body }) => { statusCode, body }.
-// Both the Vercel and Netlify adapters pass this shape through.
+// Normalized handler: (req-like { method, body }) => { statusCode, headers, body }.
 export async function handleGeminiRequest(req) {
   if (req.method !== "POST") {
     return json({ error: "Method not allowed. Use POST." }, 405);
@@ -37,28 +40,55 @@ export async function handleGeminiRequest(req) {
     );
   }
 
-  let prompt;
+  let prompt = "";
+  let rawContents = null;
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+    rawContents = Array.isArray(body?.contents) ? body.contents : null;
   } catch {
     return json({ error: "Invalid JSON body." }, 400);
   }
 
-  if (!prompt) {
+  if (!prompt && !rawContents) {
     return json({ error: "Prompt is required." }, 400);
   }
-  if (prompt.length > 8000) {
-    return json({ error: "Prompt is too long (max 8000 characters)." }, 413);
+
+  // Build the Gemini `contents` payload. Two modes:
+  //  • Multi-turn: the client sends `contents` (recent chat history including
+  //    the new user turn). Turns are capped and roles normalized
+  //    (assistant -> model, which is what Gemini expects).
+  //  • Single-turn: `prompt` only — the original compatible path.
+  let apiContents;
+  if (rawContents) {
+    if (rawContents.length > MAX_TURNS) {
+      return json({ error: `Conversation is too long (max ${MAX_TURNS} turns).` }, 413);
+    }
+    apiContents = [];
+    for (const turn of rawContents.slice(-MAX_TURNS)) {
+      const text = typeof turn?.text === "string" ? turn.text.trim().slice(0, MAX_PROMPT_CHARS) : "";
+      if (!text) continue;
+      apiContents.push({ role: turn?.role === "model" ? "model" : "user", parts: [{ text }] });
+    }
+    if (apiContents.length === 0) {
+      return json({ error: "Prompt is required." }, 400);
+    }
+    // Gemini requires the conversation to end on a user turn.
+    if (apiContents[apiContents.length - 1].role !== "user") {
+      apiContents.push({ role: "user", parts: [{ text: prompt || "Continue." }] });
+    }
+  } else {
+    if (prompt.length > MAX_PROMPT_CHARS) {
+      return json({ error: `Prompt is too long (max ${MAX_PROMPT_CHARS} characters).` }, 413);
+    }
+    apiContents = [{ role: "user", parts: [{ text: prompt }] }];
   }
 
   try {
     const upstream = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
+      body: JSON.stringify({ contents: apiContents }),
     });
 
     const data = await upstream.json().catch(() => ({}));

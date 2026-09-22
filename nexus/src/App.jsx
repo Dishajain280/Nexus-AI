@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Component } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -161,9 +161,16 @@ function ConfirmDialog({ dialog, onConfirm, onCancel }) {
 /* ================================================================
    Snippet Modal
    ================================================================ */
+// Normalize a comma-separated tag string (or array) into a clean tag list.
+const parseTags = (value) => {
+  const list = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(list.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean))].slice(0, 8);
+};
+
 function SnippetModal({ snippet, onClose, onSave }) {
   const [name, setName] = useState(snippet?.name || "");
   const [code, setCode] = useState(snippet?.code || "");
+  const [tags, setTags] = useState((snippet?.tags || []).join(", "));
   const nameRef = useRef(null);
   const overlayRef = useRef(null);
 
@@ -185,16 +192,23 @@ function SnippetModal({ snippet, onClose, onSave }) {
           <label className="form-field">
             <span>Name</span>
             <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onSave(snippet.id, name.trim(), code); }} />
+              onKeyDown={(e) => { if (e.key === "Enter") onSave(snippet.id, name.trim(), code, tags); }} />
           </label>
           <label className="form-field">
             <span>Code</span>
             <textarea value={code} onChange={(e) => setCode(e.target.value)} rows="10" spellCheck="false" />
           </label>
+          <label className="form-field">
+            <span>Tags</span>
+            <input value={tags} onChange={(e) => setTags(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onSave(snippet.id, name.trim(), code, tags); }}
+              placeholder="react, css, algorithms" />
+            <small className="form-hint">Comma-separated — used for filtering on the Snippets page</small>
+          </label>
         </div>
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => onSave(snippet.id, name.trim(), code)}>Save Changes</button>
+          <button className="primary" onClick={() => onSave(snippet.id, name.trim(), code, tags)}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -439,6 +453,8 @@ function AppShell() {
   const [editingSnippetId, setEditingSnippetId] = useState(null);
   const [snippetSearch, setSnippetSearch] = useState("");
   const [snippetView, setSnippetView] = useState("grid");
+  const [snippetTagInput, setSnippetTagInput] = useState("");
+  const [activeTag, setActiveTag] = useState("");
   const [trackerFilter, setTrackerFilter] = useState("all");
   const [aiHistory, setAiHistory] = useState(() => {
     if (!isStorageAvailable()) return [];
@@ -514,25 +530,42 @@ function AppShell() {
   }, []);
 
   // ---- Gemini ----
-  const handleSend = async () => {
-    const prompt = aiPrompt.trim();
+  // Multi-turn conversation: the last few real turns are sent to the API as
+  // `contents` so follow-up questions work. Error/cancel notices never
+  // become context. Regenerate drops the trailing assistant replies and
+  // re-asks the last user prompt.
+  const CHAT_CONTEXT_TURNS = 8;
+  const isNotice = (content) =>
+    content.startsWith("⚠️") || content.startsWith("ℹ️") || content.startsWith("⏹️");
+
+  const sendPrompt = async (promptText, { regenerate = false } = {}) => {
+    const prompt = promptText.trim();
     if (!prompt || loading) return;
     if (abortRef.current) abortRef.current.abort();
 
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
-    setAiPrompt("");
     addToHistory(prompt);
 
-    // Add user message to chat
-    setChatMessages((prev) => [...prev, { role: "user", content: prompt }]);
+    let msgs = chatMessages;
+    if (regenerate) {
+      msgs = [...msgs];
+      while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+    }
+    const history = msgs
+      .filter((m) => !isNotice(m.content))
+      .slice(-CHAT_CONTEXT_TURNS)
+      .map((m) => ({ role: m.role === "assistant" ? "model" : "user", text: m.content }));
+
+    if (regenerate) setChatMessages(msgs);
+    else setChatMessages((prev) => [...prev, { role: "user", content: prompt }]);
 
     try {
       const apiRes = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, contents: [...history, { role: "user", text: prompt }] }),
         signal: controller.signal,
       });
 
@@ -570,6 +603,22 @@ function AppShell() {
     }
   };
 
+  const handleSend = async () => {
+    if (!aiPrompt.trim() || loading) return;
+    setAiPrompt("");
+    await sendPrompt(aiPrompt);
+  };
+
+  const regenerateLast = async () => {
+    if (loading) return;
+    let lastUser = "";
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      if (chatMessages[i].role === "user") { lastUser = chatMessages[i].content; break; }
+    }
+    if (!lastUser) return;
+    await sendPrompt(lastUser, { regenerate: true });
+  };
+
   const handleCancel = () => {
     if (abortRef.current) abortRef.current.abort();
     setLoading(false);
@@ -577,9 +626,10 @@ function AppShell() {
   };
 
   const addToHistory = (prompt) => {
+    const now = new Date();
     setAiHistory((prev) => [
-      { id: uid(), prompt: prompt.slice(0, 120), time: new Date().toLocaleTimeString() },
-      ...prev.slice(0, 19),
+      { id: uid(), prompt: prompt.slice(0, 120), time: now.toLocaleTimeString(), at: now.getTime() },
+      ...prev.slice(0, 49),
     ]);
   };
 
@@ -624,9 +674,25 @@ function AppShell() {
     const name = snippetName.trim();
     if (!name) { showToast("Give the snippet a name first", { kind: "undo" }); return; }
     if (!lastAiMessage) { showToast("Nothing to save yet — ask the AI something first", { kind: "undo" }); return; }
-    setSnippets([{ id: uid(), name, code: lastAiMessage }, ...snippets]);
+    setSnippets([{ id: uid(), name, code: lastAiMessage, tags: parseTags(snippetTagInput) }, ...snippets]);
     setSnippetName("");
+    setSnippetTagInput("");
     showToast(`Saved "${name}"`);
+  };
+
+  // AI → Tracker bridge: turn the latest AI explanation into a learning topic.
+  const saveAsTopic = () => {
+    if (!lastAiMessage) return;
+    const headingLine = lastAiMessage.split("\n").find((l) => /^#{1,3}\s+/.test(l));
+    const name = (headingLine ? headingLine.replace(/^#{1,3}\s+/, "") : lastAiMessage.split("\n")[0] || "")
+      .replace(/[*`#]/g, "")
+      .trim()
+      .slice(0, 60) || "AI topic";
+    setTrackerTopics((prev) => [
+      ...prev,
+      { id: uid(), name, status: "incomplete", notes: lastAiMessage.slice(0, 500), date: new Date().toLocaleDateString(), subTasks: [], progress: 0 },
+    ]);
+    showToast(`Added "${name}" to Learning Tracker`);
   };
 
   const copyText = useCallback(
@@ -659,9 +725,9 @@ function AppShell() {
     });
   };
 
-  const saveSnippetEdit = (id, name, code) => {
+  const saveSnippetEdit = (id, name, code, tags) => {
     if (!name) { showToast("Name can't be empty", { kind: "undo" }); return; }
-    setSnippets(snippets.map((s) => (s.id === id ? { ...s, name, code } : s)));
+    setSnippets(snippets.map((s) => (s.id === id ? { ...s, name, code, tags: parseTags(tags) } : s)));
     setEditingSnippetId(null);
     showToast("Snippet updated");
   };
@@ -811,10 +877,16 @@ function AppShell() {
   };
 
   // ---- Filtered data ----
-  const filteredSnippets = snippets.filter((s) =>
-    s.name.toLowerCase().includes(snippetSearch.toLowerCase()) ||
-    (s.code || "").toLowerCase().includes(snippetSearch.toLowerCase()),
-  );
+  const allTags = [...new Set(snippets.flatMap((s) => s.tags || []))].sort();
+  const filteredSnippets = snippets.filter((s) => {
+    const q = snippetSearch.toLowerCase();
+    const matchesSearch =
+      s.name.toLowerCase().includes(q) ||
+      (s.code || "").toLowerCase().includes(q) ||
+      (s.tags || []).some((t) => t.includes(q));
+    const matchesTag = !activeTag || (s.tags || []).includes(activeTag);
+    return matchesSearch && matchesTag;
+  });
   const filteredTopics = trackerTopics.filter((t) => trackerFilter === "all" ? true : t.status === trackerFilter);
   const stats = getStats();
 
@@ -827,6 +899,37 @@ function AppShell() {
   ];
 
   const currentPageTitle = navItems.find((n) => n.page === currentPage)?.label || "NEXUS";
+
+  // ---- Activity streak & heatmap (real, local timestamps only) ----
+  const activity = useMemo(() => {
+    const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const counts = new Map();
+    const bump = (ts) => {
+      if (!Number.isFinite(ts)) return;
+      const k = dayKey(new Date(ts));
+      counts.set(k, (counts.get(k) || 0) + 1);
+    };
+    for (const h of aiHistory) bump(typeof h.at === "number" ? h.at : Date.parse(h.time));
+    for (const t of trackerTopics) bump(Date.parse(t.date));
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const cells = [];
+    for (let i = 34; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const k = dayKey(d);
+      const count = counts.get(k) || 0;
+      const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : 3;
+      cells.push({ key: k, count, level });
+    }
+    let streak = 0;
+    const cursor = new Date(today);
+    if (!counts.get(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1); // today not started yet → grace
+    while (counts.get(dayKey(cursor)) && streak < 365) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return { streak, cells, activeDays: cells.filter((c) => c.count > 0).length };
+  }, [aiHistory, trackerTopics]);
 
   // ---- Page Components ----
   const pageComponents = {
@@ -955,6 +1058,27 @@ function AppShell() {
             </div>
           </div>
 
+          {/* Activity Streak & Heatmap */}
+          <div className="dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h3>🔥 Activity Streak</h3>
+            </div>
+            <div className="dashboard-panel-body">
+              <div className="streak-row">
+                <span className="streak-num">{activity.streak}</span>
+                <span className="streak-label">
+                  {activity.streak > 0 ? `day streak 🔥` : "no streak yet — start today!"}
+                  <small>{activity.activeDays} active day{activity.activeDays !== 1 ? "s" : ""} in the last 5 weeks (AI prompts & topics)</small>
+                </span>
+              </div>
+              <div className="heatmap" role="img" aria-label={`Activity heatmap: ${activity.activeDays} active days out of 35`}>
+                {activity.cells.map((c) => (
+                  <span key={c.key} className={`heat-cell lv${c.level}`} title={`${c.key}${c.count ? `: ${c.count} activity` : ""}`} />
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* AI Chat History */}
           <div className="dashboard-panel" style={{ gridColumn: aiHistory.length > 0 ? "1 / -1" : undefined }}>
             <div className="dashboard-panel-header">
@@ -1017,6 +1141,9 @@ function AppShell() {
             <p>Generate, debug, and explore code with Gemini-powered AI</p>
           </div>
           {chatMessages.length > 0 && (
+            <span className="ai-context-badge" title="The AI sees your recent messages as context">🔗 Multi-turn memory</span>
+          )}
+          {chatMessages.length > 0 && (
             <button className="btn-ghost" onClick={() => { setChatMessages([]); }} style={{ fontSize: ".78rem", padding: ".35rem .7rem", flexShrink: 0 }}>
               🗑️ New Chat
             </button>
@@ -1045,7 +1172,15 @@ function AppShell() {
                   {msg.role === "user" ? (
                     <span>{msg.content}</span>
                   ) : (
-                    renderMsgContent(msg.content)
+                    <>
+                      <div className="ai-msg-body">{renderMsgContent(msg.content)}</div>
+                      <div className="ai-msg-actions">
+                        <button onClick={() => copyText(msg.content, "Message copied")}>📋 Copy</button>
+                        {i === chatMessages.length - 1 && (
+                          <button onClick={regenerateLast} disabled={loading}>🔄 Regenerate</button>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               ))
@@ -1069,9 +1204,19 @@ function AppShell() {
                 placeholder="Save as snippet..."
                 style={{ flex: 1, minWidth: 120, padding: '.35rem .55rem', fontSize: '.8rem', background: 'var(--input-bg)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text)' }}
               />
+              <input
+                className="save-tags-input"
+                value={snippetTagInput}
+                onChange={(e) => setSnippetTagInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveSnippet(); }}
+                placeholder="🏷 react, css"
+                aria-label="Tags for the new snippet"
+                style={{ width: 130, padding: '.35rem .55rem', fontSize: '.8rem', background: 'var(--input-bg)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text)' }}
+              />
               <button onClick={() => copyText(lastAiMessage)}>📋 Copy all</button>
               <button onClick={() => copyText(extractFirstCodeBlock(lastAiMessage), "Code copied")}>📋 Copy code</button>
               <button onClick={saveSnippet} disabled={!snippetName.trim()} style={{ color: snippetName.trim() ? 'var(--accent)' : undefined }}>💾 Save</button>
+              <button onClick={saveAsTopic} title="Turn this explanation into a learning topic">📚 Add as topic</button>
             </div>
           )}
 
@@ -1125,6 +1270,15 @@ function AppShell() {
           </div>
         </div>
 
+        {allTags.length > 0 && (
+          <div className="tag-filter-row" role="group" aria-label="Filter snippets by tag">
+            <button className={`tag-chip ${activeTag === "" ? "active" : ""}`} onClick={() => setActiveTag("")} aria-pressed={activeTag === ""}>all</button>
+            {allTags.map((t) => (
+              <button key={t} className={`tag-chip ${activeTag === t ? "active" : ""}`} onClick={() => setActiveTag(activeTag === t ? "" : t)} aria-pressed={activeTag === t}>#{t}</button>
+            ))}
+          </div>
+        )}
+
         {filteredSnippets.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📝</div>
@@ -1138,6 +1292,13 @@ function AppShell() {
                 <div className="snippet-card-header">
                   <h4>{s.name}</h4>
                 </div>
+                {(s.tags || []).length > 0 && (
+                  <div className="snippet-tags">
+                    {s.tags.map((t) => (
+                      <button key={t} className="tag-chip" onClick={() => setActiveTag(t)} title={`Filter by #${t}`}>#{t}</button>
+                    ))}
+                  </div>
+                )}
                 <pre className="snippet-card-code">
                   <code>{(s.code || "").length > 200 ? `${s.code.slice(0, 200)}...` : (s.code || "")}</code>
                 </pre>

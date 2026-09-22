@@ -86,10 +86,14 @@ export function normalizeSnippet(snippet) {
   const name = typeof snippet.name === "string" ? snippet.name.trim() : "";
   const code = typeof snippet.code === "string" ? snippet.code : "";
   if (!name && !code) return null;
+  const tags = Array.isArray(snippet.tags)
+    ? [...new Set(snippet.tags.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean))].slice(0, 8)
+    : [];
   return {
     id: snippet.id != null ? snippet.id : uid(),
     name: name || "Untitled snippet",
     code,
+    tags,
   };
 }
 
