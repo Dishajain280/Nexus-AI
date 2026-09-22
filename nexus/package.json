@@ -1,0 +1,9 @@
+{
+  "devDependencies": {
+    "@types/react-router-dom": "^5.3.3",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.10",
+    "react-router-dom": "^7.14.1",
+    "tailwindcss": "^4.2.2"
+  }
+}

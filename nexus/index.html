@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NEXUS — AI Developer Workspace</title>
+    <meta name="description" content="AI coding assistant, snippet manager, and learning tracker — all in one place." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+    <script>
+      // Apply the saved theme before first paint to avoid a dark flash for
+      // light-theme users. Matches lib/storage.js key + values.
+      (function () {
+        try {
+          var raw = localStorage.getItem("nexus:theme");
+          if (raw !== "dark" && raw !== "light") {
+            raw = raw === null ? null : JSON.parse(raw);
+          }
+          if (raw === "dark" || raw === "light") {
+            document.documentElement.dataset.theme = raw;
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
