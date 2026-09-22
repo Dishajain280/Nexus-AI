@@ -45,29 +45,29 @@
 }
 
 [data-theme="light"] {
-  --bg: #f0f3f7;
-  --bg-deep: #e4e8ee;
+  --bg: #ecf2f9;
+  --bg-deep: #dfe8f3;
   --surface: rgba(255, 255, 255, 0.92);
   --surface-solid: #ffffff;
-  --surface-hover: rgba(245, 247, 250, 0.95);
-  --text: #1a2c3a;
-  --text-muted: #5a6f82;
-  --text-dim: #8a9bb0;
+  --surface-hover: rgba(240, 246, 252, 0.95);
+  --text: #212F3C;
+  --text-muted: #4f6780;
+  --text-dim: #7f96ad;
   --accent: #FF5733;
   --accent-hover: #e64a19;
   --accent-secondary: #2874A6;
   --accent-secondary-hover: #1e6088;
-  --accent-glow: rgba(255, 87, 51, 0.15);
-  --accent-glow-sm: rgba(255, 87, 51, 0.06);
-  --blue-glow: rgba(40, 116, 166, 0.1);
-  --border: rgba(0, 0, 0, 0.08);
-  --border-hover: rgba(0, 0, 0, 0.14);
-  --input-bg: rgba(0, 0, 0, 0.03);
-  --code-bg: #f5f6f8;
-  --code-header-bg: #eaecf0;
-  --glow: 0 8px 32px rgba(40, 116, 166, 0.08);
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.1);
+  --accent-glow: rgba(255, 87, 51, 0.14);
+  --accent-glow-sm: rgba(255, 87, 51, 0.07);
+  --blue-glow: rgba(40, 116, 166, 0.14);
+  --border: rgba(40, 116, 166, 0.16);
+  --border-hover: rgba(40, 116, 166, 0.32);
+  --input-bg: rgba(40, 116, 166, 0.05);
+  --code-bg: #eef3fa;
+  --code-header-bg: #e3ebf5;
+  --glow: 0 8px 32px rgba(40, 116, 166, 0.12);
+  --shadow: 0 4px 24px rgba(30, 58, 90, 0.08);
+  --shadow-lg: 0 12px 48px rgba(30, 58, 90, 0.12);
   --success: #16a34a;
   --success-bg: rgba(22, 163, 74, 0.08);
   --danger: #dc2626;
@@ -382,7 +382,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
 }
-[data-theme="light"] .app-header { background: rgba(255, 255, 255, 0.85); }
+[data-theme="light"] .app-header { background: rgba(248, 251, 254, 0.88); }
 .app-header-left { display: flex; align-items: center; gap: .75rem; }
 .app-header h1 {
   margin: 0; font-size: 1.15rem; font-weight: 800; color: #fff;
@@ -1174,7 +1174,7 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); outline
 .ai-msg-actions button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-glow-sm); }
 .ai-msg-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .ai-context-badge {
-  font-size: .7rem; font-weight: 600; color: #7FB3D5;
+  font-size: .7rem; font-weight: 600; color: var(--accent-secondary);
   background: var(--blue-glow); border: 1px solid rgba(40, 116, 166, 0.45);
   border-radius: 999px; padding: .28rem .65rem; white-space: nowrap;
 }
