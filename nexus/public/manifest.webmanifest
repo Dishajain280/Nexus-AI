@@ -1,0 +1,14 @@
+{
+  "name": "NEXUS AI — Developer Workspace",
+  "short_name": "NEXUS",
+  "description": "AI code helper, snippet manager, and learning tracker — local-first, offline-ready.",
+  "start_url": "/home",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#212F3C",
+  "theme_color": "#212F3C",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

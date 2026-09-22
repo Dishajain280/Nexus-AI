@@ -24,6 +24,7 @@ import {
   readJSON,
 } from "./lib/storage.js";
 import { parseSegments, extractFirstCodeBlock } from "./lib/markdown.js";
+import { semanticSearch } from "./lib/semantic.js";
 
 /* ================================================================
    Toasts
@@ -455,6 +456,9 @@ function AppShell() {
   const [snippetView, setSnippetView] = useState("grid");
   const [snippetTagInput, setSnippetTagInput] = useState("");
   const [activeTag, setActiveTag] = useState("");
+  const [semanticMode, setSemanticMode] = useState(false);
+  const [semanticResults, setSemanticResults] = useState(null);
+  const [semanticStatus, setSemanticStatus] = useState("");
   const [trackerFilter, setTrackerFilter] = useState("all");
   const [aiHistory, setAiHistory] = useState(() => {
     if (!isStorageAvailable()) return [];
@@ -469,6 +473,10 @@ function AppShell() {
   });
   const abortRef = useRef(null);
   const chatEndRef = useRef(null);
+  // Live snapshots for tool execution (search must see current state even
+  // mid-agentic-round, before React commits).
+  const snippetsRef = useRef(snippets);
+  const pendingSnippetsRef = useRef([]);
   const { toasts, showToast, dismissToast } = useToasts();
 
   const setCurrentPage = useCallback((page) => { navigate(`/${page}`); }, [navigate]);
@@ -508,6 +516,8 @@ function AppShell() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  useEffect(() => { snippetsRef.current = snippets; }, [snippets]);
+
   // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -530,42 +540,136 @@ function AppShell() {
   }, []);
 
   // ---- Gemini ----
-  // Multi-turn conversation: the last few real turns are sent to the API as
-  // `contents` so follow-up questions work. Error/cancel notices never
-  // become context. Regenerate drops the trailing assistant replies and
-  // re-asks the last user prompt.
+  // Agentic loop: the model can call local tools (save/search snippets,
+  // add topics). Calls execute against app state, results go back to the
+  // model, and it continues — up to MAX_TOOL_ROUNDS per user request.
   const CHAT_CONTEXT_TURNS = 8;
+  const MAX_TOOL_ROUNDS = 4;
   const isNotice = (content) =>
     content.startsWith("⚠️") || content.startsWith("ℹ️") || content.startsWith("⏹️");
 
-  const sendPrompt = async (promptText, { regenerate = false } = {}) => {
-    const prompt = promptText.trim();
-    if (!prompt || loading) return;
-    if (abortRef.current) abortRef.current.abort();
+  const TOOL_DECLARATIONS = [{
+    functionDeclarations: [
+      {
+        name: "save_snippet",
+        description: "Save a code snippet to the user's local snippet library. Use when the user asks to store or keep code, or when you produced code they likely want to keep.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            name: { type: "STRING", description: "Short descriptive name" },
+            code: { type: "STRING", description: "The code to save" },
+            tags: { type: "STRING", description: "Comma-separated lowercase tags, e.g. 'react, hooks'" },
+          },
+          required: ["name", "code"],
+        },
+      },
+      {
+        name: "search_snippets",
+        description: "Search the user's saved snippet library by keywords. Use when the user asks whether they already have code for something.",
+        parameters: {
+          type: "OBJECT",
+          properties: { query: { type: "STRING", description: "Keywords to search for" } },
+          required: ["query"],
+        },
+      },
+      {
+        name: "add_topic",
+        description: "Add a learning topic to the user's learning tracker.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            name: { type: "STRING", description: "Topic name" },
+            notes: { type: "STRING", description: "Optional short notes" },
+          },
+          required: ["name"],
+        },
+      },
+    ],
+  }];
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setLoading(true);
-    addToHistory(prompt);
-
-    let msgs = chatMessages;
-    if (regenerate) {
-      msgs = [...msgs];
-      while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+  // Execute one tool call against local state. Returns the response object
+  // sent back to the model.
+  const runTool = (call) => {
+    const args = call.args || {};
+    try {
+      if (call.name === "save_snippet") {
+        const name = String(args.name || "Untitled snippet").slice(0, 80);
+        const code = String(args.code || "");
+        if (!code.trim()) return { ok: false, error: "code was empty" };
+        const snippet = { id: uid(), name, code, tags: parseTags(args.tags) };
+        pendingSnippetsRef.current = [snippet, ...pendingSnippetsRef.current];
+        setSnippets((prev) => [snippet, ...prev]);
+        return { ok: true, saved: name };
+      }
+      if (call.name === "search_snippets") {
+        const q = String(args.query || "").toLowerCase();
+        const seen = new Set();
+        const pool = [...pendingSnippetsRef.current, ...snippetsRef.current].filter((s) =>
+          seen.has(String(s.id)) ? false : (seen.add(String(s.id)), true),
+        );
+        const hits = pool
+          .filter((s) =>
+            s.name.toLowerCase().includes(q) ||
+            (s.code || "").toLowerCase().includes(q) ||
+            (s.tags || []).some((t) => t.includes(q)))
+          .slice(0, 5)
+          .map((s) => ({ name: s.name, tags: s.tags || [], preview: (s.code || "").slice(0, 300) }));
+        return { ok: true, matches: hits, totalSearched: pool.length };
+      }
+      if (call.name === "add_topic") {
+        const name = String(args.name || "").trim().slice(0, 60);
+        if (!name) return { ok: false, error: "name was empty" };
+        setTrackerTopics((prev) => [
+          ...prev,
+          { id: uid(), name, status: "incomplete", notes: String(args.notes || "").slice(0, 500), date: new Date().toLocaleDateString(), subTasks: [], progress: 0 },
+        ]);
+        return { ok: true, added: name };
+      }
+      return { ok: false, error: `Unknown tool: ${call.name}` };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
     }
-    const history = msgs
-      .filter((m) => !isNotice(m.content))
-      .slice(-CHAT_CONTEXT_TURNS)
-      .map((m) => ({ role: m.role === "assistant" ? "model" : "user", text: m.content }));
+  };
 
-    if (regenerate) setChatMessages(msgs);
-    else setChatMessages((prev) => [...prev, { role: "user", content: prompt }]);
+  const sendPrompt = async (promptText, opts = {}) => {
+    const { regenerate = false, depth = 0, presetContents = null, silent = false } = opts;
+    const prompt = (promptText || "").trim();
+    if ((!prompt && !presetContents) || (loading && depth === 0)) return;
+
+    if (depth === 0) {
+      if (abortRef.current) abortRef.current.abort();
+      abortRef.current = new AbortController();
+      setLoading(true);
+      if (!silent) addToHistory(prompt);
+    }
+    const controller = abortRef.current;
+
+    let contents;
+    let msgs = chatMessages;
+    if (presetContents) {
+      contents = presetContents;
+    } else {
+      if (regenerate) {
+        msgs = [...msgs];
+        while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+      }
+      const history = msgs
+        .filter((m) => !isNotice(m.content) && !m.toolEvents)
+        .slice(-CHAT_CONTEXT_TURNS)
+        .map((m) => ({ role: m.role === "assistant" ? "model" : "user", text: m.content }));
+      contents = [...history, { role: "user", text: prompt }];
+    }
+
+    if (depth === 0) {
+      if (regenerate) setChatMessages(msgs);
+      else setChatMessages((prev) => [...prev, { role: "user", content: prompt }]);
+    }
 
     try {
       const apiRes = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, contents: [...history, { role: "user", text: prompt }] }),
+        body: JSON.stringify({ prompt, contents, tools: TOOL_DECLARATIONS }),
         signal: controller.signal,
       });
 
@@ -580,7 +684,32 @@ function AppShell() {
 
       const candidate = data.candidates?.[0];
       const finishReason = candidate?.finishReason;
-      const aiText = candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join("");
+      const parts = candidate?.content?.parts || [];
+      const toolCalls = parts.filter((p) => p.functionCall).map((p) => p.functionCall);
+
+      // ---- Agentic round: execute tools locally, feed results back ----
+      if (toolCalls.length > 0 && depth < MAX_TOOL_ROUNDS) {
+        const responseParts = [];
+        const narrations = [];
+        for (const call of toolCalls) {
+          const result = runTool(call);
+          responseParts.push({ functionResponse: { name: call.name, response: result } });
+          narrations.push({ name: call.name, ok: result.ok !== false });
+        }
+        setChatMessages((prev) => [...prev, { role: "assistant", content: "", toolEvents: narrations }]);
+        await sendPrompt("", {
+          depth: depth + 1,
+          silent: true,
+          presetContents: [
+            ...contents,
+            { role: "model", parts },
+            { role: "function", parts: responseParts },
+          ],
+        });
+        return;
+      }
+
+      const aiText = parts.map((p) => p.text).filter(Boolean).join("");
 
       if (!aiText) {
         const msg =
@@ -598,8 +727,10 @@ function AppShell() {
       if (err.name === "AbortError") return;
       setChatMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Failed to reach the AI service. Check your connection." }]);
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
-      if (abortRef.current === controller) abortRef.current = null;
+      if (depth === 0) {
+        if (!controller.signal.aborted) setLoading(false);
+        if (abortRef.current === controller) abortRef.current = null;
+      }
     }
   };
 
@@ -665,7 +796,7 @@ function AppShell() {
   const lastAiMessage = (() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       const m = chatMessages[i];
-      if (m.role === "assistant" && !m.content.startsWith("⚠️") && !m.content.startsWith("ℹ️") && !m.content.startsWith("⏹️")) return m.content;
+      if (m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && !m.content.startsWith("ℹ️") && !m.content.startsWith("⏹️")) return m.content;
     }
     return "";
   })();
@@ -878,6 +1009,8 @@ function AppShell() {
 
   // ---- Filtered data ----
   const allTags = [...new Set(snippets.flatMap((s) => s.tags || []))].sort();
+
+  // Keyword mode: name / tags / code match.
   const filteredSnippets = snippets.filter((s) => {
     const q = snippetSearch.toLowerCase();
     const matchesSearch =
@@ -887,6 +1020,29 @@ function AppShell() {
     const matchesTag = !activeTag || (s.tags || []).includes(activeTag);
     return matchesSearch && matchesTag;
   });
+
+  // Semantic mode: embeddings decide relevance (debounced while typing).
+  // Falls back to keyword results automatically if embeddings are unavailable.
+  useEffect(() => {
+    if (!semanticMode || !snippetSearch.trim()) { setSemanticResults(null); setSemanticStatus(""); return; }
+    const timer = setTimeout(async () => {
+      try {
+        setSemanticStatus("embedding…");
+        const results = await semanticSearch(snippets, snippetSearch);
+        setSemanticResults(results);
+      } catch {
+        setSemanticResults(null);
+      } finally {
+        setSemanticStatus("");
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [semanticMode, snippetSearch, snippets]);
+
+  const visibleSnippets =
+    semanticMode && semanticResults
+      ? semanticResults.filter((s) => !activeTag || (s.tags || []).includes(activeTag))
+      : filteredSnippets;
   const filteredTopics = trackerTopics.filter((t) => trackerFilter === "all" ? true : t.status === trackerFilter);
   const stats = getStats();
 
@@ -1171,6 +1327,14 @@ function AppShell() {
                 <div key={i} className={`ai-msg ${msg.role}`}>
                   {msg.role === "user" ? (
                     <span>{msg.content}</span>
+                  ) : msg.toolEvents ? (
+                    <div className="tool-narrations">
+                      {msg.toolEvents.map((t, j) => (
+                        <span key={j} className={`tool-chip ${t.ok ? "" : "err"}`}>
+                          {t.ok ? "⚙️" : "⚠️"} {t.name}() {t.ok ? "executed" : "failed"}
+                        </span>
+                      ))}
+                    </div>
                   ) : (
                     <>
                       <div className="ai-msg-body">{renderMsgContent(msg.content)}</div>
@@ -1268,7 +1432,17 @@ function AppShell() {
             <button className={snippetView === "grid" ? "active" : ""} onClick={() => setSnippetView("grid")} aria-pressed={snippetView === "grid"}>▦ Grid</button>
             <button className={snippetView === "list" ? "active" : ""} onClick={() => setSnippetView("list")} aria-pressed={snippetView === "list"}>☰ List</button>
           </div>
+          <button
+            className={`semantic-toggle ${semanticMode ? "active" : ""}`}
+            onClick={() => { setSemanticMode(!semanticMode); setSemanticResults(null); }}
+            aria-pressed={semanticMode}
+            title="Rank results by meaning using embeddings, not just keywords"
+          >
+            ✨ Semantic
+          </button>
         </div>
+
+        {semanticMode && semanticStatus && <div className="semantic-status">{semanticStatus}</div>}
 
         {allTags.length > 0 && (
           <div className="tag-filter-row" role="group" aria-label="Filter snippets by tag">
@@ -1279,7 +1453,7 @@ function AppShell() {
           </div>
         )}
 
-        {filteredSnippets.length === 0 ? (
+        {visibleSnippets.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📝</div>
             <h3>{snippetSearch ? "No matching snippets" : "No snippets yet"}</h3>
@@ -1287,7 +1461,7 @@ function AppShell() {
           </div>
         ) : (
           <div className={`snippets-grid view-${snippetView}`}>
-            {filteredSnippets.map((s) => (
+            {visibleSnippets.map((s) => (
               <div key={s.id} className="snippet-card">
                 <div className="snippet-card-header">
                   <h4>{s.name}</h4>
