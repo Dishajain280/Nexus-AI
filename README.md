@@ -6,6 +6,7 @@
 
 **A centralized developer workspace — an agentic AI helper, snippet manager, and learning tracker in one fast, local-first, offline-ready app.**
 
+[![CI](https://github.com/Dishajain280/Nexus-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Dishajain280/Nexus-AI/actions/workflows/ci.yml)
 [![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-ai--tool--nexus.vercel.app-FF5733?style=for-the-badge)](https://ai-tool-nexus.vercel.app)
 
 ![React](https://img.shields.io/badge/React-19-2874A6?logo=react&logoColor=white)
@@ -101,6 +102,7 @@ npm run dev        # → http://localhost:5173
 | `npm run build` | Production build to `dist/` |
 | `npm run preview` | Serve the production build |
 | `npm run lint` | ESLint |
+| `npm run test:run` | Vitest unit tests (storage normalization, share links, markdown parsing, proxy core) |
 
 **API key (optional locally):** create `nexus/.env` (git-ignored) with `GEMINI_API_KEY=<your key>` from [Google AI Studio](https://aistudio.google.com/apikey). Without it, everything except AI generation and semantic search works, and the app explains exactly what's missing. Free-tier note: the preview model allows ~20 requests/minute — the chat surfaces Google's retry countdown rather than hiding it.
 
@@ -119,9 +121,9 @@ Deployments are preconfigured for both platforms — see the full details in [`n
 - [x] Agentic tool calling — the AI saves snippets, searches the library, and adds topics
 - [x] Semantic snippet search (embeddings + IndexedDB + cosine ranking)
 - [x] Installable offline PWA
+- [x] Unit tests (Vitest) + CI pipeline — lint + tests + build on every push (see `.github/workflows/ci.yml`)
 - [ ] Streaming responses (token-by-token) with stop / regenerate
 - [ ] Chat with snippets — include retrieved snippet code in the AI's context
-- [ ] Unit tests (Vitest) + CI pipeline
 - [ ] Cloud sync (opt-in) with accounts — local-first stays the default
 
 ## 🎓 What I learned

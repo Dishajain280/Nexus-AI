@@ -25,8 +25,10 @@ import {
   readJSON,
 } from "./lib/storage.js";
 import { parseSegments, extractFirstCodeBlock } from "./lib/markdown.js";
+import { humanizeApiError } from "./lib/errors.js";
 import { encodeSnippetToHash, decodeSnippetFromHash } from "./lib/share.js";
 import { semanticSearch } from "./lib/semantic.js";
+import { maybeSeedDemoData } from "./lib/demo-seed.js";
 
 /* ================================================================
    Toasts
@@ -221,11 +223,69 @@ function SnippetModal({ snippet, onClose, onSave }) {
 /* ================================================================
    Landing Page
    ================================================================ */
+// Repo, live demo, and contact — used across the landing + footer so links
+// never drift apart.
+const REPO_URL = "https://github.com/Dishajain280/Nexus-AI";
+const LINKEDIN_URL = "https://www.linkedin.com/in/disha-pirodiya";
+const CONTACT_EMAIL = "dishapirodiya@gmail.com";
+
+// Landing features lead with the differentiators — what the AI *does*, not a
+// taxonomy of pages.
 const FEATURES = [
-  { icon: "💾", title: "Snippet Storage", desc: "Save, search, and organize code snippets with instant copy-to-clipboard and inline editing." },
-  { icon: "🤖", title: "AI Code Helper", desc: "Generate components, debug errors, and explore patterns with Gemini-powered assistance." },
-  { icon: "📚", title: "Learning Tracker", desc: "Track topics with status, progress bars, sub-tasks, and overall completion — never lose momentum." },
-  { icon: "📊", title: "Analytics Dashboard", desc: "See at a glance how many snippets you've saved and your learning progress across topics." },
+  {
+    icon: "🤖",
+    title: "An AI that acts, not just answers",
+    desc: "Agentic tool calling: “save this debounce function, then show my other JS snippets” — and the app does it. Narration chips show every action the AI executed.",
+  },
+  {
+    icon: "✨",
+    title: "Search by meaning, not keywords",
+    desc: "Snippets are embedded into vectors, so “how to flatten a nested array” finds your Flatten-array snippet even though they share no words.",
+  },
+  {
+    icon: "📚",
+    title: "A tracker that builds streaks",
+    desc: "Topics, sub-tasks, progress rings, activity heatmaps, and spaced-repetition review — the AI can add topics for you in one click.",
+  },
+  {
+    icon: "📴",
+    title: "Works offline. Zero accounts.",
+    desc: "An installable PWA. Everything is stored in your browser — no sign-up, no database, no telemetry — and it keeps working when the Wi-Fi doesn't.",
+  },
+];
+
+// Screenshot showcase — real UI captures from docs/screens.
+const SHOWCASE = [
+  {
+    src: "screens/03-ai-helper.png",
+    alt: "AI Helper chat: an agentic request with tool-calling narration chips and a markdown answer",
+    caption: "Agentic chat with ⚙️ tool-call chips",
+    repoPath: "nexus/src/App.jsx",
+  },
+  {
+    src: "screens/04-snippets.png",
+    alt: "Snippet library with tag filter chips, grid/list views, and semantic search toggle",
+    caption: "Semantic search over your snippet library",
+    repoPath: "nexus/src/lib/semantic.js",
+  },
+  {
+    src: "screens/05-tracker.png",
+    alt: "Learning tracker with stat cards, progress ring, and topic cards",
+    caption: "Progress rings, streaks, and spaced review",
+    repoPath: "nexus/src/App.jsx",
+  },
+  {
+    src: "screens/02-dashboard.png",
+    alt: "Dashboard with activity streak heatmap and restorable AI conversations",
+    caption: "Streak heatmap + restorable AI threads",
+    repoPath: "nexus/src/lib/storage.js",
+  },
+  {
+    src: "screens/01b-landing-hero.png",
+    alt: "NEXUS landing page hero",
+    caption: "The workspace you're looking at",
+    repoPath: "nexus/src/App.jsx",
+  },
 ];
 
 function LandingPage() {
@@ -283,12 +343,14 @@ function LandingPage() {
             <span className="blue">Empower Developers.</span>
           </h1>
           <p className="hero-sub">
-            One workspace for code snippets, AI assistance, and learning tracking —
-            designed for developers who ship fast.
+            An agentic AI helper, a snippet library with semantic search, and a
+            learning tracker — one local-first workspace that works offline.
           </p>
           <div className="hero-actions">
-            <button className="btn btn-primary" onClick={() => navigate("/ai")}>Get Started →</button>
-            <a className="btn btn-secondary" href="#features">Learn More</a>
+            <button className="btn btn-primary" onClick={() => navigate("/ai")}>Open the App — it's live</button>
+            <a className="btn btn-secondary" href={REPO_URL} target="_blank" rel="noopener noreferrer">
+              ⭐ Star on GitHub
+            </a>
           </div>
           <div className="hero-stats">
             {liveStats.snippets > 0 || liveStats.topics > 0 ? (
@@ -308,6 +370,29 @@ function LandingPage() {
         </div>
       </section>
 
+      <section className="section section-showcase" id="showcase">
+        <div className="section-header reveal">
+          <h2>See it in action</h2>
+          <p>Real screens from the live app — every pixel ships from the repo below.</p>
+        </div>
+        <div className="showcase-grid">
+          {SHOWCASE.map((shot, idx) => (
+            <figure key={shot.src} className={`showcase-item ${idx === 0 ? "showcase-lead" : ""}`}>
+              <img src={shot.src} alt={shot.alt} loading="lazy" />
+              <figcaption>
+                <span>{shot.caption}</span>
+                <a href={`${REPO_URL}/blob/main/${shot.repoPath}`} target="_blank" rel="noopener noreferrer" title={`View the source: ${shot.repoPath}`}>
+                  {shot.repoPath} ↗
+                </a>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+        <p className="showcase-note">
+          Every screenshot is from the running app — <a href={REPO_URL} target="_blank" rel="noopener noreferrer">read the source</a>.
+        </p>
+      </section>
+
       <section className="section" id="features">
         <div className="section-header reveal">
           <h2>Everything You Need</h2>
@@ -324,54 +409,18 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="section">
-        <div className="section-header reveal">
-          <h2>Why NEXUS</h2>
-          <p>Real capabilities, demonstrated — not invented numbers.</p>
-        </div>
-        <div className="metrics-grid">
-          {[
-            { value: "3-in-1", label: "AI assistant, snippet manager, and learning tracker in one workspace" },
-            { value: "100%", label: "Of your data stays local — private by default, exportable anytime" },
-            { value: "3", label: "Built-in workflows: AI helper, snippet library, learning tracker" },
-          ].map((m) => (
-            <div key={m.label} className="metric-card">
-              <div className="metric-value">{m.value}</div>
-              <div className="metric-label">{m.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="section section-alt">
-        <div className="section-header reveal">
-          <h2>Built Around Developer Workflows</h2>
-          <p>The daily loops NEXUS is designed to serve.</p>
-        </div>
-        <div className="testimonials-grid">
-          {[
-            { title: "Debugging a stubborn error", desc: "Paste the stack trace into the AI Helper, get a diagnosis with a fix, and save the working pattern as a snippet for next time.", icon: "🐛" },
-            { title: "Learning something new", desc: "Break a topic into sub-tasks in the Tracker, slide progress as you go, and watch the overall ring fill up.", icon: "📖" },
-            { title: "Reusing what you already wrote", desc: "Search every snippet by name or code content, copy it in one click, and stop scrolling old projects.", icon: "♻️" },
-          ].map((t) => (
-            <div key={t.title} className="testimonial-card">
-              <p className="testimonial-text">{t.desc}</p>
-              <div className="testimonial-author">
-                <div className="testimonial-avatar" aria-hidden="true">{t.icon}</div>
-                <div><div className="testimonial-name">{t.title}</div><div className="testimonial-role">Core workflow</div></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <footer className="footer">
         <div className="footer-links">
           <a href="#features">Features</a>
-          <button onClick={() => navigate("/ai")} style={{ background: "none", border: "none", color: "var(--accent-secondary)", fontWeight: 500 }}>Open App</button>
-          <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href={LINKEDIN_URL} target="_blank" rel="noopener noreferrer">LinkedIn</a>
+          <a href={`mailto:${CONTACT_EMAIL}`}>dishapirodiya@gmail.com</a>
+          <button onClick={() => navigate("/ai")} className="footer-nav-btn">Open App</button>
         </div>
-        <p className="footer-copy">© {new Date().getFullYear()} NEXUS. Built for developers who ship.</p>
+        <p className="footer-copy">
+          © {new Date().getFullYear()} NEXUS · Built by Disha Pirodiya ·{" "}
+          <a href={REPO_URL} target="_blank" rel="noopener noreferrer">github.com/Dishajain280/Nexus-AI</a>
+        </p>
       </footer>
     </div>
   );
@@ -409,7 +458,7 @@ const PROMPT_TEMPLATES = [
    App Shell
    ================================================================ */
 const VALID_PAGES = ["home", "ai", "snippets", "tracker", "settings"];
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.5.0";
 
 function AppShell() {
   const navigate = useNavigate();
@@ -716,8 +765,7 @@ function AppShell() {
       const data = await apiRes.json().catch(() => ({}));
 
       if (!apiRes.ok) {
-        const errText = data.error || `Request failed (HTTP ${apiRes.status})`;
-        setChatMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${errText}` }]);
+        setChatMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${humanizeApiError(data.error, apiRes.status)}` }]);
         return;
       }
 
@@ -1391,7 +1439,8 @@ function AppShell() {
               <div className="ai-empty-chat">
                 <div className="empty-icon">🤖</div>
                 <h3>Ready to help</h3>
-                <p>Pick a template above or write your own prompt. You can ask for components, debug code, write tests, and more.</p>
+                <p>Pick a template above or write your own prompt — components, debugging, tests, and more.</p>
+                <p className="ai-empty-note">Powered by Gemini · free tier ≈ 20 requests/min · the workspace works offline (only live AI needs a connection).</p>
               </div>
             ) : (
               chatMessages.map((msg, i) => (
@@ -1528,7 +1577,12 @@ function AppShell() {
           <div className="empty-state">
             <div className="empty-icon">📝</div>
             <h3>{snippetSearch ? "No matching snippets" : "No snippets yet"}</h3>
-            <p>{snippetSearch ? "Try a different search term." : "Use the AI Helper to generate code, then save it here."}</p>
+            <p>{snippetSearch ? "Try a different search term." : "Ask the AI to generate code and save it here — or open a shared snippet link and import it in one click."}</p>
+            {!snippetSearch && (
+              <div className="empty-actions">
+                <button className="btn btn-primary" onClick={() => setCurrentPage("ai")}>🤖 Ask the AI Helper</button>
+              </div>
+            )}
           </div>
         ) : (
           <div className={`snippets-grid view-${snippetView}`}>
@@ -1904,6 +1958,8 @@ function AppShell() {
    Router
    ================================================================ */
 export default function App() {
+  // Documentation screenshots: /?demo=1 seeds example data (see lib/demo-seed.js).
+  maybeSeedDemoData();
   return (
     <ErrorBoundary>
       <BrowserRouter>
