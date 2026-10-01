@@ -34,7 +34,7 @@ describe("normalizeSnippet", () => {
   it("keeps valid snippets and lowercases/dedupes tags", async () => {
     const { normalizeSnippet } = await loadLib();
     const out = normalizeSnippet({ id: "a1", name: " Debounce ", code: "const d=...", tags: ["JS", "js", " React ", ""] });
-    expect(out).toEqual({ id: "a1", name: "Debounce", code: "const d=...", tags: ["js", "react"] });
+    expect(out).toEqual({ id: "a1", name: "Debounce", code: "const d=...", tags: ["js", "react"], language: "", createdAt: "", updatedAt: "", copies: 0 });
   });
 
   it("rejects junk and backfills name when only code exists", async () => {
@@ -50,6 +50,21 @@ describe("normalizeSnippet", () => {
     const { normalizeSnippet } = await loadLib();
     const out = normalizeSnippet({ name: "n", code: "c", tags: Array.from({ length: 12 }, (_, i) => `t${i}`) });
     expect(out.tags).toHaveLength(8);
+  });
+
+  it("carries language and copy counts, backfills timestamps from uid", async () => {
+    const { normalizeSnippet, uid } = await loadLib();
+    const explicit = normalizeSnippet({ id: "a", name: "n", code: "c", language: " TypeScript ", copies: 3.7, createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-02T00:00:00Z" });
+    expect(explicit.language).toBe("typescript");
+    expect(explicit.copies).toBe(3);
+    expect(explicit.createdAt).toBe("2026-05-01T00:00:00Z");
+
+    const legacy = normalizeSnippet({ id: uid(), name: "old", code: "c" });
+    expect(legacy.createdAt).not.toBe(""); // recovered from the id's embedded timestamp
+    expect(legacy.updatedAt).toBe(legacy.createdAt);
+
+    const handMade = normalizeSnippet({ id: "demo-1", name: "x", code: "c" });
+    expect(handMade.createdAt).toBe(""); // no trustworthy timestamp
   });
 });
 

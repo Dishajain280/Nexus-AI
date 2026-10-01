@@ -113,6 +113,17 @@ export function normalizeThread(thread) {
   return { id: thread.id, title, messages, at };
 }
 
+// uid() embeds the creation moment as base-36 milliseconds — recover it for
+// items saved before createdAt existed. Returns null for ids without a sane
+// timestamp (hand-made ids like "demo-1" would decode to 1970).
+export function timestampFromId(id) {
+  const match = /^([a-z0-9]+)-/.exec(String(id || ""));
+  if (!match) return null;
+  const ms = parseInt(match[1], 36);
+  // Timestamps before 2020 are almost certainly not real creation dates.
+  return Number.isFinite(ms) && ms > 1577836800000 ? new Date(ms).toISOString() : null;
+}
+
 export function normalizeSnippet(snippet) {
   if (!snippet || typeof snippet !== "object") return null;
   const name = typeof snippet.name === "string" ? snippet.name.trim() : "";
@@ -121,11 +132,27 @@ export function normalizeSnippet(snippet) {
   const tags = Array.isArray(snippet.tags)
     ? [...new Set(snippet.tags.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean))].slice(0, 8)
     : [];
+  const language = typeof snippet.language === "string" ? snippet.language.trim().toLowerCase().slice(0, 24) : "";
+  const fromId = timestampFromId(snippet.id);
+  const createdAt =
+    typeof snippet.createdAt === "string" && !Number.isNaN(Date.parse(snippet.createdAt))
+      ? snippet.createdAt
+      : fromId || "";
+  const updatedAt =
+    typeof snippet.updatedAt === "string" && !Number.isNaN(Date.parse(snippet.updatedAt))
+      ? snippet.updatedAt
+      : createdAt;
+  const copiesRaw = Number(snippet.copies);
+  const copies = Number.isFinite(copiesRaw) && copiesRaw > 0 ? Math.floor(copiesRaw) : 0;
   return {
     id: snippet.id != null ? snippet.id : uid(),
     name: name || "Untitled snippet",
     code,
     tags,
+    language,
+    createdAt,
+    updatedAt,
+    copies,
   };
 }
 
