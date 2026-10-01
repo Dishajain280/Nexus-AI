@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue, Component } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -26,9 +26,13 @@ import {
 } from "./lib/storage.js";
 import { parseSegments, extractFirstCodeBlock } from "./lib/markdown.js";
 import { humanizeApiError } from "./lib/errors.js";
+import { highlightCode, LANGUAGES, detectLanguage } from "./lib/highlight.js";
+import { fuzzySubsequence, scoreKeyword, blendScores, sortSnippets } from "./lib/snippet-search.js";
+import { semanticScores } from "./lib/semantic.js";
 import { encodeSnippetToHash, decodeSnippetFromHash } from "./lib/share.js";
-import { semanticSearch } from "./lib/semantic.js";
 import { maybeSeedDemoData } from "./lib/demo-seed.js";
+import { maybeSeedStressData } from "./lib/stress-seed.js";
+import SnippetCard from "./SnippetCard.jsx";
 
 /* ================================================================
    Toasts
@@ -172,48 +176,60 @@ const parseTags = (value) => {
   return [...new Set(list.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean))].slice(0, 8);
 };
 
+// Create/edit modal. `snippet` carries the id when editing; null means create.
 function SnippetModal({ snippet, onClose, onSave }) {
   const [name, setName] = useState(snippet?.name || "");
   const [code, setCode] = useState(snippet?.code || "");
   const [tags, setTags] = useState((snippet?.tags || []).join(", "));
+  const [language, setLanguage] = useState(snippet?.language || "");
   const nameRef = useRef(null);
   const overlayRef = useRef(null);
 
   useEffect(() => {
-    if (!snippet) return;
+    if (snippet === null) return;
     nameRef.current?.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [snippet, onClose]);
 
-  if (!snippet) return null;
+  if (snippet === null) return null;
+  const submit = () => onSave(snippet.id, name.trim(), code, tags, language);
   return (
     <div className="modal-overlay" ref={overlayRef}
       onMouseDown={(e) => { if (e.target === overlayRef.current) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="snippet-modal-title">
-        <h3 id="snippet-modal-title">Edit Snippet</h3>
+        <h3 id="snippet-modal-title">{snippet.id ? "Edit Snippet" : "New Snippet"}</h3>
         <div className="modal-body">
           <label className="form-field">
             <span>Name</span>
             <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onSave(snippet.id, name.trim(), code, tags); }} />
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
           </label>
           <label className="form-field">
             <span>Code</span>
             <textarea value={code} onChange={(e) => setCode(e.target.value)} rows="10" spellCheck="false" />
           </label>
-          <label className="form-field">
-            <span>Tags</span>
-            <input value={tags} onChange={(e) => setTags(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onSave(snippet.id, name.trim(), code, tags); }}
-              placeholder="react, css, algorithms" />
-            <small className="form-hint">Comma-separated — used for filtering on the Snippets page</small>
-          </label>
+          <div className="form-row">
+            <label className="form-field">
+              <span>Language</span>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                <option value="">Auto-detect</option>
+                {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Tags</span>
+              <input value={tags} onChange={(e) => setTags(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+                placeholder="react, css, algorithms" />
+            </label>
+          </div>
+          <small className="form-hint">Tags are comma-separated and used for filtering. Language enables syntax highlighting.</small>
         </div>
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => onSave(snippet.id, name.trim(), code, tags)}>Save Changes</button>
+          <button className="primary" onClick={submit}>{snippet.id ? "Save Changes" : "Add Snippet"}</button>
         </div>
       </div>
     </div>
@@ -458,7 +474,7 @@ const PROMPT_TEMPLATES = [
    App Shell
    ================================================================ */
 const VALID_PAGES = ["home", "ai", "snippets", "tracker", "settings"];
-const APP_VERSION = "2.5.0";
+const APP_VERSION = "2.6.0";
 
 function AppShell() {
   const navigate = useNavigate();
@@ -481,6 +497,14 @@ function AppShell() {
   const [storageWarning, setStorageWarning] = useState(() => !isStorageAvailable());
   const [confirmState, setConfirmState] = useState(null);
   const [editingSnippetId, setEditingSnippetId] = useState(null);
+  // null = closed; { id: null } = create modal; { id } = edit modal.
+  const [snippetModal, setSnippetModal] = useState(null);
+  const [viewingSnippetId, setViewingSnippetId] = useState(null);
+  // Multi-select for bulk delete/tagging; tag manager visibility.
+  const [selectedSnippetIds, setSelectedSnippetIds] = useState(() => new Set());
+  const [bulkTagInput, setBulkTagInput] = useState("");
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [snippetSort, setSnippetSort] = useState("newest");
   const [snippetSearch, setSnippetSearch] = useState("");
   const [snippetView, setSnippetView] = useState("grid");
   const [snippetTagInput, setSnippetTagInput] = useState("");
@@ -515,6 +539,7 @@ function AppShell() {
   });
   const abortRef = useRef(null);
   const chatEndRef = useRef(null);
+  const snippetSearchRef = useRef(null);
   // Live snapshots for tool execution (search must see current state even
   // mid-agentic-round, before React commits).
   const snippetsRef = useRef(snippets);
@@ -945,6 +970,8 @@ function AppShell() {
     showToast(`Saved "${name}"`);
   };
 
+  // editingSnippetId kept for the AI-page "save from chat" flow flag; the
+  // modal itself is snippetModal-driven now.
   // AI → Tracker bridge: turn the latest AI explanation into a learning topic.
   const saveAsTopic = () => {
     if (!lastAiMessage) return;
@@ -987,6 +1014,17 @@ function AppShell() {
     [showToast],
   );
 
+  // Copy that also records usage — feeds the "Most copied" sort. Local-only:
+  // the count never leaves the browser, unlike server-side popularity metrics.
+  const copySnippetText = useCallback(
+    (snippet) => {
+      if (!snippet) return;
+      setSnippets((prev) => prev.map((s) => (s.id === snippet.id ? { ...s, copies: (s.copies || 0) + 1 } : s)));
+      copyText(snippet.code, `Copied "${snippet.name}"`);
+    },
+    [copyText],
+  );
+
   // Ask the AI about a snippet: preloads the prompt and jumps to the chat.
   const handleAskAboutSnippet = (snippet) => {
     if (!snippet) return;
@@ -1008,18 +1046,41 @@ function AppShell() {
   };
 
   const handleImportShared = (data) => {
-    const snippet = { id: uid(), name: data.name, code: data.code, tags: data.tags || [] };
+    const snippet = normalizeSnippet({ id: uid(), name: data.name, code: data.code, tags: data.tags || [], createdAt: new Date().toISOString() });
     setSnippets((prev) => [snippet, ...prev]);
     setSharedSnippet(null);
     history.replaceState(null, "", window.location.pathname + window.location.search);
     showToast("Imported \"" + data.name + "\" from the shared link");
   };
 
+  // ---- Snippet modal (create + edit) ----
+  const openCreateSnippet = () => setSnippetModal({ id: null });
+  const openEditSnippet = (id) => setSnippetModal({ id });
+
+  const saveSnippetModal = (id, name, code, tags, language) => {
+    if (!name) { showToast("Name can't be empty", { kind: "undo" }); return; }
+    const now = new Date().toISOString();
+    // "Auto-detect" = best-effort detection from the code itself.
+    const lang = language || detectLanguage(code) || "";
+    if (id) {
+      setSnippets((prev) => prev.map((s) => (s.id === id ? { ...s, name, code, tags: parseTags(tags), language: lang, updatedAt: now } : s)));
+      showToast("Snippet updated");
+    } else {
+      const created = normalizeSnippet({ id: uid(), name, code, tags: parseTags(tags), language: lang, createdAt: now, updatedAt: now });
+      setSnippets((prev) => [created, ...prev]);
+      showToast(`Added "${name}"${lang && !language ? ` (${lang})` : ""}`);
+    }
+    setSnippetModal(null);
+  };
+
+  const viewingSnippet = snippets.find((s) => s.id === viewingSnippetId) || null;
+
   const deleteSnippetWithUndo = (id) => {
     const index = snippets.findIndex((s) => s.id === id);
     if (index === -1) return;
     const removed = snippets[index];
     if (editingSnippetId === id) setEditingSnippetId(null);
+    if (viewingSnippetId === id) setViewingSnippetId(null);
     setSnippets(snippets.filter((s) => s.id !== id));
     showToast(`Deleted "${removed.name}"`, {
       kind: "undo",
@@ -1027,14 +1088,57 @@ function AppShell() {
     });
   };
 
-  const saveSnippetEdit = (id, name, code, tags) => {
-    if (!name) { showToast("Name can't be empty", { kind: "undo" }); return; }
-    setSnippets(snippets.map((s) => (s.id === id ? { ...s, name, code, tags: parseTags(tags) } : s)));
-    setEditingSnippetId(null);
-    showToast("Snippet updated");
+
+
+  // ---- Bulk selection + tag manager ----
+  const toggleSnippetSelected = (id) =>
+    setSelectedSnippetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const clearSelection = () => { setSelectedSnippetIds(new Set()); setBulkTagInput(""); };
+
+  const bulkDeleteSelected = () => {
+    const ids = [...selectedSnippetIds];
+    if (ids.length === 0) return;
+    const removed = snippets.filter((s) => ids.includes(s.id));
+    setConfirmState({
+      title: `Delete ${ids.length} snippet${ids.length !== 1 ? "s" : ""}?`,
+      message: `${removed.map((s) => s.name).slice(0, 3).join(", ")}${removed.length > 3 ? ` and ${removed.length - 3} more` : ""} will be removed.`,
+      confirmLabel: "Delete",
+      action: () => {
+        setSnippets((prev) => prev.filter((s) => !ids.includes(s.id)));
+        clearSelection();
+        showToast(`Deleted ${ids.length} snippet${ids.length !== 1 ? "s" : ""}`);
+      },
+    });
   };
 
-  const editingSnippet = snippets.find((s) => s.id === editingSnippetId) || null;
+  const bulkAddTag = () => {
+    const tag = parseTags(bulkTagInput)[0];
+    if (!tag || selectedSnippetIds.size === 0) return;
+    setSnippets((prev) =>
+      prev.map((s) => (selectedSnippetIds.has(s.id) && !(s.tags || []).includes(tag) ? { ...s, tags: [...(s.tags || []), tag].slice(0, 8), updatedAt: new Date().toISOString() } : s)),
+    );
+    showToast(`Tagged ${selectedSnippetIds.size} snippet${selectedSnippetIds.size !== 1 ? "s" : ""} #${tag}`);
+    clearSelection();
+  };
+
+  const renameEveryTag = (from, to) => {
+    const target = parseTags(to)[0];
+    let touched = 0;
+    setSnippets((prev) =>
+      prev.map((s) => {
+        if (!(s.tags || []).includes(from)) return s;
+        touched++;
+        const tags = target ? [...new Set((s.tags || []).map((t) => (t === from ? target : t)))] : (s.tags || []).filter((t) => t !== from);
+        return { ...s, tags, updatedAt: new Date().toISOString() };
+      }),
+    );
+    showToast(target ? `Renamed #${from} → #${target} on ${touched} snippet${touched !== 1 ? "s" : ""}` : `Removed #${from} from ${touched} snippet${touched !== 1 ? "s" : ""}`);
+  };
 
   // ---- Tracker ----
   const addTopic = () => {
@@ -1197,39 +1301,88 @@ function AppShell() {
   // ---- Filtered data ----
   const allTags = [...new Set(snippets.flatMap((s) => s.tags || []))].sort();
 
-  // Keyword mode: name / tags / code match.
-  const filteredSnippets = snippets.filter((s) => {
-    const q = snippetSearch.toLowerCase();
-    const matchesSearch =
-      s.name.toLowerCase().includes(q) ||
-      (s.code || "").toLowerCase().includes(q) ||
-      (s.tags || []).some((t) => t.includes(q));
-    const matchesTag = !activeTag || (s.tags || []).includes(activeTag);
-    return matchesSearch && matchesTag;
-  });
+  // Search pipeline runs on a deferred copy of the query: the input stays
+  // keystroke-responsive while scoring + re-rendering 300 highlighted cards
+  // happens at lower priority.
+  const deferredSearch = useDeferredValue(snippetSearch);
 
-  // Semantic mode: embeddings decide relevance (debounced while typing).
-  // Falls back to keyword results automatically if embeddings are unavailable.
+  // Keyword/fuzzy pass with per-snippet reasons (drives the ranking bars).
+  const keywordMatches = useMemo(() => {
+    const q = deferredSearch.trim();
+    if (!q) return null; // no query → plain sorted library
+    const map = new Map();
+    for (const s of snippets) {
+      const { score, reasons } = scoreKeyword(s, q);
+      if (score > 0) map.set(s.id, { score, reasons });
+    }
+    return map;
+  }, [snippets, deferredSearch]);
+
+  const hasQuery = Boolean(deferredSearch.trim());
+  // With a query: results must match keywords (exact or fuzzy). Hybrid scoring
+  // only re-ranks that keyword-matched set — semantic never smuggles in
+  // non-matches the user can't see highlighted.
+  const searchedSnippets = useMemo(() => {
+    if (!hasQuery) return snippets;
+    return snippets.filter((s) => keywordMatches.has(s.id));
+  }, [snippets, keywordMatches, hasQuery]);
+
+  // Semantic mode: cosine scores for the keyword-matched set (debounced).
+  // Unavailable embeddings = empty map → keyword/fuzzy ranking stands alone.
   useEffect(() => {
-    if (!semanticMode || !snippetSearch.trim()) { setSemanticResults(null); setSemanticStatus(""); return; }
+    if (!semanticMode || !hasQuery) { setSemanticResults(null); setSemanticStatus(""); return; }
     const timer = setTimeout(async () => {
       try {
         setSemanticStatus("embedding…");
-        const results = await semanticSearch(snippets, snippetSearch);
-        setSemanticResults(results);
+        const scores = await semanticScores(searchedSnippets, deferredSearch);
+        setSemanticResults(scores.size > 0 ? scores : null);
+        setSemanticStatus(scores.size > 0 ? "" : "no embeddings — keyword ranking");
       } catch {
         setSemanticResults(null);
-      } finally {
-        setSemanticStatus("");
+        setSemanticStatus("no embeddings — keyword ranking");
       }
     }, 450);
     return () => clearTimeout(timer);
-  }, [semanticMode, snippetSearch, snippets]);
+  }, [semanticMode, hasQuery, deferredSearch, searchedSnippets]);
 
-  const visibleSnippets =
-    semanticMode && semanticResults
-      ? semanticResults.filter((s) => !activeTag || (s.tags || []).includes(activeTag))
-      : filteredSnippets;
+  // While searching, only the top-ranked results render — typing "a" into a
+  // 5,000-snippet library must not mount 5,000 highlighted cards per keystroke.
+  const SEARCH_RENDER_CAP = 300;
+  const visibleSnippets = useMemo(() => {
+    let list = searchedSnippets.filter((s) => !activeTag || (s.tags || []).includes(activeTag));
+    if (hasQuery) {
+      list = list
+        .map((s) => {
+          const kw = keywordMatches.get(s.id) || { score: 0, reasons: {} };
+          const sem = semanticMode && semanticResults ? semanticResults.get(String(s.id)) : null;
+          return { snippet: s, blended: blendScores(kw.score, sem), kw, sem };
+        })
+        .sort((a, b) => b.blended - a.blended)
+        .map((r) => r.snippet);
+      if (list.length > SEARCH_RENDER_CAP) list = list.slice(0, SEARCH_RENDER_CAP);
+    } else {
+      list = sortSnippets(list, snippetSort);
+    }
+    return list;
+  }, [searchedSnippets, activeTag, hasQuery, keywordMatches, semanticMode, semanticResults, snippetSort]);
+
+  // Total tag-filtered matches before the render cap (for the "top N" note).
+  const matchedTotal = useMemo(
+    () => (hasQuery ? searchedSnippets.filter((s) => !activeTag || (s.tags || []).includes(activeTag)).length : 0),
+    [searchedSnippets, activeTag, hasQuery],
+  );
+
+  // Ranks for the "why this ranked" bars, keyed by snippet id.
+  const rankingById = useMemo(() => {
+    if (!hasQuery) return null;
+    const map = new Map();
+    for (const s of visibleSnippets) {
+      const kw = keywordMatches.get(s.id) || { score: 0, reasons: {} };
+      const sem = semanticMode && semanticResults ? semanticResults.get(String(s.id)) : null;
+      map.set(s.id, { blended: blendScores(kw.score, sem), kw, sem });
+    }
+    return map;
+  }, [visibleSnippets, hasQuery, keywordMatches, semanticMode, semanticResults]);
   const filteredTopics = trackerTopics.filter((t) => trackerFilter === "all" ? true : t.status === trackerFilter);
   const stats = getStats();
 
@@ -1539,15 +1692,22 @@ function AppShell() {
       <section className="page-content" aria-label="Snippets">
         <div className="page-header">
           <h2><span className="page-icon">💾</span> Code Snippets</h2>
-          <p>{snippets.length} snippet{snippets.length !== 1 ? "s" : ""} saved</p>
+          <p>{snippets.length} snippet{snippets.length !== 1 ? "s" : ""} saved · search ranks by {semanticMode ? "meaning + keywords" : "keywords"}</p>
         </div>
 
         <div className="snippets-toolbar">
           <div className="snippets-search">
             <span className="search-icon" aria-hidden="true">🔍</span>
-            <input type="search" placeholder="Search by name or code..." value={snippetSearch}
+            <input ref={snippetSearchRef} type="search" placeholder="Search by name or code… (typos ok)" value={snippetSearch}
               onChange={(e) => setSnippetSearch(e.target.value)} aria-label="Search snippets" />
           </div>
+          <select className="snippet-sort" value={snippetSort} onChange={(e) => setSnippetSort(e.target.value)} aria-label="Sort snippets"
+            disabled={hasQuery} title={hasQuery ? "Results are ordered by relevance while searching" : "Sort library"}>
+            <option value="newest">🕒 Newest</option>
+            <option value="oldest">🕰 Oldest</option>
+            <option value="name">🔤 Name</option>
+            <option value="copies">📋 Most copied</option>
+          </select>
           <div className="view-toggle" role="group" aria-label="View mode">
             <button className={snippetView === "grid" ? "active" : ""} onClick={() => setSnippetView("grid")} aria-pressed={snippetView === "grid"}>▦ Grid</button>
             <button className={snippetView === "list" ? "active" : ""} onClick={() => setSnippetView("list")} aria-pressed={snippetView === "list"}>☰ List</button>
@@ -1556,13 +1716,17 @@ function AppShell() {
             className={`semantic-toggle ${semanticMode ? "active" : ""}`}
             onClick={() => { setSemanticMode(!semanticMode); setSemanticResults(null); }}
             aria-pressed={semanticMode}
-            title="Rank results by meaning using embeddings, not just keywords"
+            title="Blend meaning (embeddings) with keyword matches when ranking results"
           >
             ✨ Semantic
           </button>
+          <button className="btn btn-primary snippet-add-btn" onClick={openCreateSnippet}>➕ Add Snippet</button>
         </div>
 
         {semanticMode && semanticStatus && <div className="semantic-status">{semanticStatus}</div>}
+        {hasQuery && matchedTotal > visibleSnippets.length && (
+          <div className="semantic-status">Showing top {visibleSnippets.length} of {matchedTotal} matches — refine the query to narrow further.</div>
+        )}
 
         {allTags.length > 0 && (
           <div className="tag-filter-row" role="group" aria-label="Filter snippets by tag">
@@ -1570,47 +1734,63 @@ function AppShell() {
             {allTags.map((t) => (
               <button key={t} className={`tag-chip ${activeTag === t ? "active" : ""}`} onClick={() => setActiveTag(activeTag === t ? "" : t)} aria-pressed={activeTag === t}>#{t}</button>
             ))}
+            <button className="tag-manage-btn" onClick={() => setTagManagerOpen(true)} title="Rename, merge, or remove tags across every snippet">⚙ manage</button>
+          </div>
+        )}
+
+        {selectedSnippetIds.size > 0 && (
+          <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
+            <strong>{selectedSnippetIds.size} selected</strong>
+            <input value={bulkTagInput} onChange={(e) => setBulkTagInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") bulkAddTag(); }}
+              placeholder="add tag…" aria-label="Tag to add to selected snippets" />
+            <button onClick={bulkAddTag} disabled={!bulkTagInput.trim()}>🏷 Tag</button>
+            <button className="danger" onClick={bulkDeleteSelected}>🗑 Delete</button>
+            <button onClick={clearSelection}>Cancel</button>
           </div>
         )}
 
         {visibleSnippets.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📝</div>
-            <h3>{snippetSearch ? "No matching snippets" : "No snippets yet"}</h3>
-            <p>{snippetSearch ? "Try a different search term." : "Ask the AI to generate code and save it here — or open a shared snippet link and import it in one click."}</p>
-            {!snippetSearch && (
+            <h3>{hasQuery ? "No matching snippets" : "No snippets yet"}</h3>
+            <p>{hasQuery
+              ? (keywordMatches.size === 0 && fuzzySubsequence(snippetSearch, snippets.map((s) => s.name).join(" ")) ? "Close — check the spelling, or add it below." : "Try a different term, or turn on ✨ Semantic to search by meaning.")
+              : "Paste code you already have, or ask the AI to generate some."}</p>
+            {!hasQuery && (
               <div className="empty-actions">
-                <button className="btn btn-primary" onClick={() => setCurrentPage("ai")}>🤖 Ask the AI Helper</button>
+                <button className="btn btn-primary" onClick={openCreateSnippet}>➕ Add Snippet</button>
+                <button className="btn btn-secondary" onClick={() => setCurrentPage("ai")}>🤖 Ask the AI Helper</button>
               </div>
             )}
           </div>
         ) : (
           <div className={`snippets-grid view-${snippetView}`}>
             {visibleSnippets.map((s) => (
-              <div key={s.id} className="snippet-card">
-                <div className="snippet-card-header">
-                  <h4>{s.name}</h4>
-                </div>
-                {(s.tags || []).length > 0 && (
-                  <div className="snippet-tags">
-                    {s.tags.map((t) => (
-                      <button key={t} className="tag-chip" onClick={() => setActiveTag(t)} title={`Filter by #${t}`}>#{t}</button>
-                    ))}
-                  </div>
-                )}
-                <pre className="snippet-card-code">
-                  <code>{(s.code || "").length > 200 ? `${s.code.slice(0, 200)}...` : (s.code || "")}</code>
-                </pre>
-                <div className="snippet-card-footer">
-                  <button onClick={() => setEditingSnippetId(s.id)}>✏️ View</button>
-                  <button onClick={() => copyText(s.code, "Code copied")}>📋 Copy</button>
-                  <button onClick={() => handleAskAboutSnippet(s)} title="Ask the AI to explain this snippet">🤖 Ask AI</button>
-                  <button onClick={() => handleShareSnippet(s)} title="Copy a share link">🔗 Share</button>
-                  <button className="danger" onClick={() => deleteSnippetWithUndo(s.id)}>🗑️ Delete</button>
-                </div>
-              </div>
+              <SnippetCard
+                key={s.id}
+                snippet={s}
+                query={hasQuery ? deferredSearch : ""}
+                rank={rankingById?.get(s.id)}
+                selected={selectedSnippetIds.has(s.id)}
+                selectionActive={selectedSnippetIds.size > 0}
+                onToggleSelect={toggleSnippetSelected}
+                onView={setViewingSnippetId}
+                onEdit={openEditSnippet}
+                onCopy={copySnippetText}
+                onAsk={handleAskAboutSnippet}
+                onShare={handleShareSnippet}
+                onDelete={deleteSnippetWithUndo}
+                onTagClick={setActiveTag}
+              />
             ))}
           </div>
+        )}
+
+        {visibleSnippets.length > 0 && (
+          <button className="select-mode-btn" onClick={() => (selectedSnippetIds.size > 0 ? clearSelection() : toggleSnippetSelected(visibleSnippets[0].id))}>
+            {selectedSnippetIds.size > 0 ? "✕ Exit selection" : "☑ Select"}
+          </button>
         )}
       </section>
     ),
@@ -1824,6 +2004,30 @@ function AppShell() {
     ),
   };
 
+  // ---- Snippets keyboard shortcuts (typing-safe: ignored in inputs) ----
+  useEffect(() => {
+    if (currentPage !== "snippets" || sidebarOpen) return;
+    const onKey = (e) => {
+      const el = document.activeElement;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        snippetSearchRef.current?.focus();
+        snippetSearchRef.current?.select();
+      } else if (e.key === "n") {
+        e.preventDefault();
+        openCreateSnippet();
+      } else if (e.key === "c" && visibleSnippets.length > 0) {
+        e.preventDefault();
+        copySnippetText(visibleSnippets[0]);
+        showToast(`Copied "${visibleSnippets[0].name}" (top result)`);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [currentPage, sidebarOpen, visibleSnippets, copySnippetText, showToast]);
+
   // ---- Sidebar & Layout ----
   return (
     <div className="app">
@@ -1948,8 +2152,72 @@ function AppShell() {
       <ConfirmDialog dialog={confirmState}
         onConfirm={() => { confirmState?.action?.(); setConfirmState(null); }}
         onCancel={() => setConfirmState(null)} />
-      <SnippetModal snippet={editingSnippet}
-        onClose={() => setEditingSnippetId(null)} onSave={saveSnippetEdit} />
+      {/* Unified create/edit modal: snippetModal = { id: null } | { id } */}
+      <SnippetModal snippet={snippetModal}
+        onClose={() => setSnippetModal(null)} onSave={saveSnippetModal} />
+
+      {/* Read-only viewer — reading never mutates. */}
+      {viewingSnippet && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setViewingSnippetId(null); }}>
+          <div className="modal snippet-viewer" role="dialog" aria-modal="true" aria-labelledby="snippet-viewer-title">
+            <div className="snippet-viewer-head">
+              <h3 id="snippet-viewer-title">{viewingSnippet.name}</h3>
+              {viewingSnippet.language && <span className="snippet-lang-badge">{viewingSnippet.language}</span>}
+              <button className="modal-close" onClick={() => setViewingSnippetId(null)} aria-label="Close viewer">✕</button>
+            </div>
+            <div className="snippet-viewer-meta">
+              {viewingSnippet.createdAt && <span>Added {new Date(viewingSnippet.createdAt).toLocaleString()}</span>}
+              {viewingSnippet.updatedAt && viewingSnippet.updatedAt !== viewingSnippet.createdAt && <span> · Edited {new Date(viewingSnippet.updatedAt).toLocaleString()}</span>}
+              <span> · Copied {viewingSnippet.copies || 0}×</span>
+            </div>
+            {(viewingSnippet.tags || []).length > 0 && (
+              <div className="snippet-tags">
+                {viewingSnippet.tags.map((t) => <button key={t} className="tag-chip" onClick={() => { setActiveTag(t); setViewingSnippetId(null); }}>#{t}</button>)}
+              </div>
+            )}
+            <pre className="snippet-viewer-code">
+              <code dangerouslySetInnerHTML={{ __html: highlightCode(viewingSnippet.code, viewingSnippet.language) }} />
+            </pre>
+            <div className="modal-actions">
+              <button onClick={() => { setViewingSnippetId(null); openEditSnippet(viewingSnippet.id); }}>✏️ Edit</button>
+              <button onClick={() => handleAskAboutSnippet(viewingSnippet)}>🤖 Ask AI</button>
+              <button onClick={() => handleShareSnippet(viewingSnippet)}>🔗 Share</button>
+              <button className="primary" onClick={() => copySnippetText(viewingSnippet)}>📋 Copy code</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tag manager: rename = merge (last value wins), empty = remove everywhere. */}
+      {tagManagerOpen && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setTagManagerOpen(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="tag-manager-title">
+            <h3 id="tag-manager-title">Manage tags</h3>
+            <div className="modal-body">
+              {allTags.length === 0 && <p className="form-hint">No tags yet.</p>}
+              {allTags.map((t) => (
+                <div key={t} className="tag-manager-row">
+                  <span className="tag-chip">#{t}</span>
+                  <span className="tag-count">{snippets.filter((s) => (s.tags || []).includes(t)).length}</span>
+                  <input
+                    placeholder="rename to… (empty = delete)"
+                    aria-label={`Rename or delete tag ${t}`}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      renameEveryTag(t, e.target.value);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              ))}
+              <small className="form-hint">Press Enter on a row to apply. Rename to an existing tag merges them; leave empty and press Enter to remove the tag everywhere.</small>
+            </div>
+            <div className="modal-actions">
+              <button className="primary" onClick={() => setTagManagerOpen(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1960,6 +2228,8 @@ function AppShell() {
 export default function App() {
   // Documentation screenshots: /?demo=1 seeds example data (see lib/demo-seed.js).
   maybeSeedDemoData();
+  // Scale testing: /?stress=1 seeds 5,000 snippets (see lib/stress-seed.js).
+  maybeSeedStressData();
   return (
     <ErrorBoundary>
       <BrowserRouter>

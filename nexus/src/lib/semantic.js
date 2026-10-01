@@ -147,8 +147,39 @@ function cosine(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
+// Cosine scores (0..1) for every snippet against the query, WITHOUT the
+// noise-floor filter or keyword fallback — the Snippets page blends these
+// with keyword scores via lib/snippet-search.js. Empty map = embeddings
+// unavailable (no key, offline, private mode), callers fall back gracefully.
+export async function semanticScores(snippets, query, { semantic = true } = {}) {
+  const q = String(query || "").trim();
+  if (!q || !semantic) return new Map();
+  let vectors = [];
+  try {
+    await syncSnippetVectors(snippets);
+    vectors = await getAllVectors();
+  } catch {
+    return new Map();
+  }
+  if (vectors.length === 0) return new Map();
+  try {
+    const [queryVec] = await embedTexts([q]);
+    const byId = new Map(vectors.map((v) => [v.id, v.vector]));
+    const scores = new Map();
+    for (const s of snippets) {
+      const vec = byId.get(String(s.id));
+      if (vec) scores.set(String(s.id), cosine(queryVec, vec));
+    }
+    return scores;
+  } catch {
+    return new Map();
+  }
+}
+
 // Rank snippets against a natural-language query. Falls back to keyword
 // matching if embeddings are unavailable (private mode, no key, offline).
+// (Kept for API compatibility; the Snippets page uses semanticScores +
+// snippet-search.blendScores for hybrid ranking.)
 export async function semanticSearch(snippets, query, { semantic = true } = {}) {
   const q = String(query || "").trim();
   if (!q) return [];
