@@ -25,7 +25,7 @@
 NEXUS replaces the three browser tabs every developer keeps open — an AI chat, a paste-bin of code snippets, and a notes file tracking what they're learning — with **one workspace**:
 
 - 🤖 **Agentic AI Helper** — Gemini-powered chat that doesn't just answer, it *acts*. Give it **tool calling** (`save_snippet`, `search_snippets`, `add_topic`) and *"save this debounce function tagged utils, then show me my other JS snippets"* becomes a single prompt the app executes — with ⚙️ narration chips showing every action the AI took. Multi-turn memory means follow-ups like "now add TypeScript types to that" work; 8 one-click prompt templates; responses render as real markdown with code blocks and per-message copy / regenerate.
-- 💾 **Snippet Storage with semantic search** — snippets are embedded into vectors (`gemini-embedding-001`, stored in IndexedDB) so you can search by *meaning*: "how to flatten a nested array" finds your `Flatten array` snippet even though they share no words. Tags with filter chips, grid/list views, one-click copy, an editor modal, and automatic keyword fallback when embeddings aren't available.
+- 💾 **Snippet Storage with hybrid search** — snippets are embedded into vectors (`gemini-embedding-001`, stored in IndexedDB) and ranked by a blend of **meaning (55%) + keyword/fuzzy match (45%)**, with per-result relevance bars showing *why* each snippet ranked. Typos still find results (subsequence fuzzy matching), matches are highlighted in place, and everything degrades to keyword ranking when embeddings aren't available. Cards carry syntax highlighting (highlight.js), language badges, `createdAt`/`updatedAt` metadata with relative timestamps, local copy-count tracking with a *Most copied* sort, bulk select → tag/delete, a tag rename/merge manager, and stays responsive at **5,000+ snippets** (memoized cards, result capping, deferred rendering — press `/`, `n`, or `c` for keyboard search/new/copy).
 - 📚 **Learning Tracker** — topics with status (pending / in progress / completed), per-topic progress sliders, sub-task checklists, a progress ring, stat cards — and an **AI bridge**: any explanation the AI gives can become a tracked topic in one click.
 - 🏠 **Dashboard** — quick actions, recent activity feed, a real activity streak + 5-week heatmap (computed from your actual usage timestamps), AI prompt history, and a getting-started checklist.
 
@@ -81,7 +81,8 @@ The same proxy core (`nexus/api/gemini-core.js`) runs on **both** Vercel and Net
 | UI | React 19 + React Router 7 | Modern concurrent React, real routing with deep links |
 | Build | Vite 8 | Instant HMR, tiny production bundles |
 | AI (chat) | Gemini `gemini-3-flash-preview` + **function calling** | Fast code responses that can act on the workspace |
-| AI (search) | Gemini `gemini-embedding-001` + cosine ranking | Semantic "search by meaning" over your own snippets (RAG-style) |
+| AI (search) | Gemini `gemini-embedding-001` + cosine ranking | Hybrid "search by meaning": 55% semantic / 45% keyword+fuzzy, with explainable relevance bars |
+| Code display | highlight.js (common languages) | Syntax highlighting, language badges, auto-detection — ~40KB gz |
 | Hosting | Vercel (primary), Netlify (supported) | Serverless functions for the proxy on both |
 | Offline | Service worker + web manifest (PWA) | Installable, network-first shell with offline fallback |
 | Styling | Hand-written CSS design system | Charcoal / Royal Blue / Fiery Orange palette, light + dark themes, no framework overhead |
@@ -122,6 +123,7 @@ Deployments are preconfigured for both platforms — see the full details in [`n
 - [x] Semantic snippet search (embeddings + IndexedDB + cosine ranking)
 - [x] Installable offline PWA
 - [x] Unit tests (Vitest) + CI pipeline — lint + tests + build on every push (see `.github/workflows/ci.yml`)
+- [x] Hybrid snippet search — semantic + keyword/fuzzy blend, match highlighting, relevance bars
 - [ ] Streaming responses (token-by-token) with stop / regenerate
 - [ ] Chat with snippets — include retrieved snippet code in the AI's context
 - [ ] Cloud sync (opt-in) with accounts — local-first stays the default
