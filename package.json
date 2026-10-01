@@ -1,14 +1,15 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "cd nexus && vite",
-    "build": "cd nexus && vite build --outDir ../dist",
+    "dev": "node init && cd nexus && vite",
+    "build": "node init && cd nexus && vite build --outDir ../dist",
     "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
     "preview": "cd nexus && vite preview"
   },
   "dependencies": {
+    "highlight.js": "^11.12.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.14.1"
